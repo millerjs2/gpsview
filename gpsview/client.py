@@ -103,4 +103,5 @@ def gpsd_feed(source: Source) -> Feed:
         make_transport=lambda: TcpTransport(source.host, source.port),
         make_decoder=lambda: GpsdDecoder(source.device),
         protocol="gpsd",
+        spec=source.spec,
     )

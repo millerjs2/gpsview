@@ -10,13 +10,10 @@ import sys
 
 from . import __version__, views
 from .app import GpsView
-from .client import parse_source
 from .fmt import DD, DDMM, DDMMSS
-from .nmea import nmea_feed
 from .ntrip import NtripError, fetch_sourcetable, make_setup, parse_ntrip_url
-from .swift import sbp_feed
-from .transports import FILE_RATE, parse_endpoint
-from .ubx import ubx_feed
+from .sources import make_feed
+from .transports import FILE_RATE
 
 LL_FORMATS = {"d": DD, "m": DDMM, "s": DDMMSS}
 
@@ -40,7 +37,10 @@ a caster's mountpoints.  --ntrip-gga SECONDS sends your position to the caster (
 need it); nothing about your position is sent without it.  gpsview never sends anything else
 to a receiver: no configuration commands.
 
-Keys (same as cgps): h help, q quit, d lat/lon format, i/m/n units, t true or
+You can also change the input from inside the app: press o (or choose "Configure another
+input" when the source cannot be reached) to pick the protocol, source and baud rate.
+
+Keys (same as cgps): h help, q quit, o input, d lat/lon format, i/m/n units, t true or
 magnetic track, s raw messages on or off, w log raw data to a file on or off,
 c clear the raw pane, 1/2/3 GNSS/IMU/RTK tabs.
 
@@ -63,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="read Swift Binary Protocol from a tty, TCP, UDP or file, bypassing gpsd")
     ap.add_argument("-ubx", "--ubx", metavar="SOURCE",
                     help="read u-blox UBX from a tty, TCP, UDP or file, bypassing gpsd")
+    ap.add_argument("-b", "--baud", metavar="RATE", default=None,
+                    help="baud rate for a tty source (default by protocol: NMEA 9600, SBP "
+                         "115200, UBX 38400); the same as /dev/ttyUSB0:RATE")
     ap.add_argument("--file-rate", type=float, default=FILE_RATE, metavar="BYTES_PER_S",
                     help="replay speed for a file source (default %(default)g, 115200 baud; "
                          "0 = as fast as possible)")
@@ -99,11 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
                          "(default: from GPSD_UNITS or the locale, as cgps)")
     ap.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
     return ap
-
-
-def _endpoint(spec: str, protocol: str, file_rate: float):
-    ep = parse_endpoint(spec, protocol)
-    return dataclasses.replace(ep, rate=file_rate) if ep.kind == "file" else ep
 
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -161,20 +159,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.file_rate < 0:
             raise ValueError("--file-rate must be 0 or more")
-        endpoint, protocol = None, "gpsd"
-        if args.nmea is not None:
-            endpoint, protocol = _endpoint(args.nmea, "nmea", args.file_rate), "nmea"
-            source = nmea_feed(endpoint)
-        elif args.sbp is not None:
-            endpoint, protocol = _endpoint(args.sbp, "sbp", args.file_rate), "sbp"
-            source = sbp_feed(endpoint)
-        elif args.ubx is not None:
-            endpoint, protocol = _endpoint(args.ubx, "ubx", args.file_rate), "ubx"
-            source = ubx_feed(endpoint)
-        else:
-            source = parse_source(args.server)
+        protocol, spec = next(((p, v) for p, v in (("nmea", args.nmea), ("sbp", args.sbp),
+                                                   ("ubx", args.ubx)) if v is not None),
+                              ("gpsd", args.server or ""))
+        source = make_feed(protocol, spec, baud=args.baud, file_rate=args.file_rate)
         if args.ntrip is not None:
-            ntrip = _ntrip_setup(args, endpoint, protocol)
+            ntrip = _ntrip_setup(args, source.endpoint, protocol)
     except ValueError as exc:
         ap.error(str(exc))
     # cgps: IMU wins over RTK if both are given

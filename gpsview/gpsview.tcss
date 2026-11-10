@@ -87,6 +87,38 @@ ConnectionScreen {
     margin-right: 2;
 }
 
+/* Configure input dialog */
+SourceScreen {
+    align: center middle;
+}
+#source {
+    width: 78;
+    max-width: 100%;
+    height: auto;
+    border: thick $success;
+    background: $surface;
+    padding: 0 2;
+}
+#source Horizontal {
+    height: auto;
+    margin-top: 1;
+}
+#source Button {
+    margin-right: 2;
+}
+#source Input {
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: $panel;
+}
+#source Input:focus {
+    background: $boost;
+}
+#source Select {
+    width: 30;
+}
+
 /* RTK corrections dialog */
 NtripScreen {
     align: center middle;

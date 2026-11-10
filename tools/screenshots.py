@@ -72,6 +72,17 @@ async def sbp_shots(spec: str) -> None:
             await pilot.pause(3)
             save(app, "gnss.svg")
 
+            await pilot.press("o")                       # the input dialog, set up for a tty
+            await pilot.pause(0.3)
+            app.screen.query_one("#src_proto").value = "ubx"
+            await pilot.pause(0.3)
+            app.screen.query_one("#src_spec").value = "/dev/ttyUSB0"
+            app.screen.query_one("#src_baud").value = "115200"
+            await pilot.pause(0.3)
+            save(app, "input-dialog.svg")
+            await pilot.press("escape")
+            await pilot.pause(0.3)
+
             await pilot.press("r")                       # the RTK dialog, filled in, not started
             await pilot.pause(0.3)
             app.screen.query_one("#ntrip_url").value = "caster.example.com:2101/MOUNT"

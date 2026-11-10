@@ -49,6 +49,7 @@ Python 3.14. The `sbp` package decodes SBP payloads; `pyserial` opens ttys.
     bin/gpsview -ubx tcp://10.0.0.7:5000
     bin/gpsview -ubx capture.ubx        # replay a file at serial speed
     bin/gpsview -n /dev/ttyACM0         # NMEA on a serial port, 9600 baud
+    bin/gpsview -ubx /dev/ttyUSB0 -b 115200     # any baud rate: -b/--baud, or /dev/ttyUSB0:115200
     bin/gpsview -n udp://:10110         # NMEA datagrams on UDP port 10110
     bin/gpsview -ubx /dev/ttyACM0 --ntrip me@caster.example.com/MOUNT   # RTK, see below
     bin/gpsview --ntrip-list caster.example.com                         # what a caster offers
@@ -68,6 +69,7 @@ gpsd server, `-n`, `-sbp`, or `-ubx`.
 | `d` | Cycle lat/lon format: DD.dddddddd, DD MM.mmmmmm', DD MM' SS.sssss" |
 | `i` `m` `n` | Imperial, metric, nautical units |
 | `t` | Show the track as true or magnetic |
+| `o` | Input: choose the protocol, source and baud rate (see [below](#choosing-the-input-in-the-app)) |
 | `r` | RTK corrections: set up, start or stop NTRIP (see [below](#ntrip-rtk-corrections)) |
 | `s` | Raw messages on or off |
 | `c` | Clear the raw pane |
@@ -190,7 +192,27 @@ A serial tty needs read access to the device, usually membership of the `dialout
 `uucp`) group (and write access too, if it is also where corrections go).
 
 The UBX default of 38400 is a ZED-F9 on UART1. An M8 on its UART is 9600: use
-`-ubx /dev/ttyACM0:9600`. A USB port ignores the baud rate.
+`-ubx /dev/ttyACM0:9600`. A native USB port (ttyACM) ignores the baud rate, but a USB-to-serial
+adapter (ttyUSB) does not. Set the rate with `-b RATE` / `--baud RATE` (50 to 4000000) or with
+the `:RATE` suffix; giving both with different values is an error, and so is a baud rate for
+a network source.
+
+### Choosing the input in the app
+
+You do not have to know the command line. Press `o` at any time to open the input dialog: pick
+the protocol (gpsd, NMEA, SBP or UBX), type the source, and, for a tty, the baud rate. The
+dialog lists the serial ports it can see. **Connect** switches over at once; the state from the
+old input is cleared, and the other settings (units, tabs, logging, NTRIP) are kept. A raw log is
+closed, because its name includes the protocol, and NTRIP on the data link is stopped if the new
+input cannot take corrections (a file or gpsd).
+
+If the input cannot be reached, which is what happens when you start `gpsview` with no
+arguments and gpsd is not running, the dialog offers **Retry**, **Configure another input**
+or **Quit**. The same choice is offered when the link is lost, at the end of a replayed file, and
+when no data arrives for 30 s (where a wrong baud rate is the usual cause). This is only about
+where the data comes from; gpsview still sends no configuration commands to the receiver.
+
+![The input dialog](docs/screenshots/input-dialog.svg)
 
 **Files** are replayed at 11520 bytes per second (115200 baud, 8N1), so a recording plays as it
 would have arrived and not all at once. `--file-rate N` changes the speed in bytes per second;
@@ -308,9 +330,9 @@ proxies, SPARTN, and sending to a receiver anything except RTCM.
 
 ## Connection behaviour
 
-* If the source cannot be reached, a dialog offers **Retry** or **Quit**.
+* If the source cannot be reached, a dialog offers **Retry**, **Configure another input** or **Quit**.
 * If the connection drops, the same dialog appears.
-* If no data arrives for 30 s, the dialog offers **Keep waiting**, **Retry** or
+* If no data arrives for 30 s, the dialog offers **Keep waiting**, **Retry**, **Configure another input** or
   **Quit**. A receiver serves one client at a time, so another phone or PC may have
   taken the stream.
 * For gpsd, a different API version from the one this client was written against
@@ -414,7 +436,7 @@ cgps is the reference. These are the places where gpsview differs on purpose.
 | Satellite table fits beside the data panel at 80 columns | Needs about 100 columns for all columns; narrower terminals scroll it sideways | The Textual table has padding. |
 | `s` hides the message window (`-s` silences it) | `s` turns raw data off; notices still show | The message pane is also where notices go. |
 | Version mismatch: warning, then a 4 s pause | Warning only | No pause in a UI. |
-| Cannot connect: prints an error and exits | Dialog with Retry or Quit | Lets you start the source and carry on. |
+| Cannot connect: prints an error and exits | Dialog with Retry, Configure another input or Quit | Lets you start the source and carry on. |
 | No data for 2 minutes: exits | Dialog after 30 s with Keep waiting | Same idea, shorter, and it asks first. |
 | IMU and RTK come only from `-i` / `-r` | Also switchable with `1` `2` `3` | Tabs in the style. |
 | Leap seconds are shown as `(0)` if gpsd omits them | Shown as `(n/a)` | Not every source has them. |
@@ -424,8 +446,9 @@ cgps is the reference. These are the places where gpsview differs on purpose.
 ## Files
 
     bin/gpsview              launcher (uses .venv if present)
-    gpsview/__main__.py      command line: gpsd server, -n, -sbp, -ubx, --ntrip
+    gpsview/__main__.py      command line: gpsd server, -n, -sbp, -ubx, --baud, --ntrip
     gpsview/app.py           the Textual app, key bindings, dialogs, the read loop
+    gpsview/sources.py       builds a Feed from protocol + source + baud (CLI and the input dialog)
     gpsview/feeds.py         Feed (transport + decoder), decoder events
     gpsview/transports.py    TCP, UDP, serial and file transports; endpoint parsing
     gpsview/client.py        gpsd: server string, ?WATCH, JSON decoder
@@ -475,7 +498,8 @@ cgps is the reference. These are the places where gpsview differs on purpose.
 * `test_ntrip.py` runs the client against `tools/fake_ntrip.py`: both versions, chunked
   encoding, wrong credentials, wrong mountpoint, sourcetable, VRS, reconnects, and that the
   forwarded RTCM is byte-exact and whole-frame. `test_corrections.py` covers the sinks.
-  `test_ntrip_dialog.py` drives the RTK dialog and the footer at 100x40.
+  `test_input_dialog.py` covers the baud rate and the input dialog (from the connection dialog and
+  the `o` key). `test_ntrip_dialog.py` drives the RTK dialog and the footer at 100x40.
   `test_ntrip_app.py` runs the app with a fake receiver and a fake caster, with corrections on
   the data link (TCP, pty, UDP), on a separate interface, across a reconnect, and checks the
   GGA the caster received and that the password appears nowhere.

@@ -58,3 +58,4 @@ class Feed:
     make_decoder: Callable[[], Decoder]
     endpoint: Endpoint | None = None    # where the data comes from; None for gpsd
     protocol: str = ""                  # "gpsd", "nmea", "sbp" or "ubx" (default baud rates)
+    spec: str = ""                      # gpsd only: the server[:port[:device]] it was made from

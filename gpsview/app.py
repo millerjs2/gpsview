@@ -7,6 +7,7 @@ interface given by --rtcm-out.  gpsview never sends configuration commands.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from dataclasses import replace
@@ -19,18 +20,19 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (Button, DataTable, Footer, Header, Input, Label, RichLog,
-                             Static, TabbedContent, TabPane)
+                             Select, Static, TabbedContent, TabPane)
 
 from . import views
 from .client import Source, gpsd_feed
 from .feeds import Decoder, Event, Feed
 from .fmt import DD, DDMM, DDMMSS
-from .corrections import Sink, SinkSpec, make_sink
+from .corrections import Sink, SameLinkSink, SinkSpec, make_sink
 from .logfile import RawLog
 from .model import GpsState
 from .nmea import gga_sentence
 from .ntrip import NtripConfig, NtripSession, make_setup
-from .transports import EndOfFile, Transport
+from .sources import PROTOCOLS, default_baud, feed_spec, find_ttys, make_feed
+from .transports import FILE_RATE, EndOfFile, Transport
 from .views import UNITS, StateTimer, ViewOpts
 
 STALL_SECONDS = 30.0     # no data for this long: ask the user what to do
@@ -45,6 +47,7 @@ h -- this help
 i -- imperial units
 m -- metric units
 n -- nautical units
+o -- choose the input: protocol, source, baud rate
 q -- quit
 r -- RTK corrections (NTRIP) setup
 s -- toggle raw messages output
@@ -80,10 +83,10 @@ class HelpScreen(ModalScreen[None]):
 
 class ConnectionScreen(ModalScreen[str]):
     """Shown when the source cannot be reached, or the stream stops. Dismisses with
-    'retry', 'wait' or 'quit'."""
+    'retry', 'wait', 'configure' or 'quit'."""
 
     def __init__(self, title: str, detail: str, can_wait: bool,
-                 retry_label: str = "Retry connection") -> None:
+                 retry_label: str = "Retry") -> None:
         super().__init__()
         self._title, self._detail, self._can_wait = title, detail, can_wait
         self._retry_label = retry_label
@@ -96,10 +99,101 @@ class ConnectionScreen(ModalScreen[str]):
                 yield Button(self._retry_label, id="retry", variant="primary")
                 if self._can_wait:
                     yield Button("Keep waiting", id="wait")
+                yield Button("Configure another input", id="configure", variant="success")
                 yield Button("Quit", id="quit", variant="error")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id or "quit")
+
+
+class SourceScreen(ModalScreen["Feed | None"]):
+    """Choose where the data comes from: protocol, source and (for a tty) baud rate.
+    Dismisses with a Feed, or None if cancelled."""
+
+    def __init__(self, feed: Feed) -> None:
+        super().__init__()
+        self._feed = feed
+        self._ttys = find_ttys()
+        self._auto = ""                      # a suggestion we filled in, safe to replace
+
+    def compose(self) -> ComposeResult:
+        feed = self._feed
+        spec = feed_spec(feed)
+        ep = feed.endpoint
+        baud = str(ep.baud) if ep is not None and ep.kind == "serial" else ""
+        with Vertical(id="source"):
+            yield Label(Text("Configure input", style="bold"))
+            yield Label("Protocol")
+            yield Select([(name, key) for name, key in PROTOCOLS], value=feed.protocol or "gpsd",
+                         allow_blank=False, compact=True, id="src_proto")
+            yield Label("Source", id="src_label")
+            yield Input(spec, id="src_spec")
+            yield Static("", id="src_hint")
+            yield Label("Baud rate  (tty only; blank = the protocol's default)")
+            yield Input(baud, id="src_baud")
+            yield Static("", id="src_ports")
+            yield Static("", id="src_error")
+            with Horizontal():
+                yield Button("Connect", id="connect", variant="primary")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self._describe(self.query_one("#src_proto", Select).value)
+        ports = "  ".join(self._ttys[:6]) if self._ttys else "none found"
+        self.query_one("#src_ports", Static).update(Text(f"Serial ports: {ports}", style="dim"))
+        self.query_one("#src_spec", Input).focus()
+
+    def _describe(self, protocol) -> None:
+        if protocol == "gpsd":
+            label, hint = "gpsd server", "server[:port[:device]]   blank = localhost:2947"
+            self.query_one("#src_baud", Input).placeholder = "n/a for gpsd"
+        else:
+            label = "Source"
+            hint = "/dev/ttyUSB0[:baud]   host:port   udp://:port   or a file to replay"
+            self.query_one("#src_baud", Input).placeholder = f"{default_baud(str(protocol))}"
+        self.query_one("#src_label", Label).update(label)
+        self.query_one("#src_hint", Static).update(Text(hint, style="dim"))
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        event.stop()
+        self._describe(event.value)
+        box = self.query_one("#src_spec", Input)
+        if (self._auto and box.value == self._auto) or (
+                event.value != "gpsd" and box.value == feed_spec(self._feed)
+                and self._feed.protocol == "gpsd"):
+            self._auto = self._ttys[0] if event.value != "gpsd" and self._ttys else ""
+            box.value = self._auto
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            event.stop()
+            self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "cancel":
+            self.dismiss(None)
+        else:
+            self._connect()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._connect()
+
+    def _connect(self) -> None:
+        protocol = str(self.query_one("#src_proto", Select).value)
+        try:
+            feed = make_feed(protocol, self.query_one("#src_spec", Input).value,
+                             baud=self.query_one("#src_baud", Input).value,
+                             file_rate=self._file_rate())
+        except ValueError as exc:
+            self.query_one("#src_error", Static).update(Text(str(exc), style="bold red"))
+            return
+        self.dismiss(feed)
+
+    def _file_rate(self) -> float:
+        ep = self._feed.endpoint
+        return ep.rate if ep is not None else FILE_RATE
 
 
 class NtripScreen(ModalScreen["tuple[NtripConfig, SinkSpec] | str | None"]):
@@ -195,6 +289,7 @@ class GpsView(App):
         Binding("m", "set_units('m')", "Metric", show=False),
         Binding("n", "set_units('n')", "Nautical", show=False),
         Binding("t", "toggle_track", "Track"),
+        Binding("o", "input_dialog", "Input"),
         Binding("r", "ntrip_dialog", "RTK"),
         Binding("s", "toggle_raw", "Raw"),
         Binding("w", "toggle_log", "Log"),
@@ -265,6 +360,46 @@ class GpsView(App):
                 self.start_ntrip(*result)
         self.push_screen(NtripScreen(self), done)
 
+    def action_input_dialog(self) -> None:
+        if isinstance(self.screen, ModalScreen):
+            return
+
+        def done(feed: Feed | None) -> None:
+            if feed is not None:
+                self._adopt(feed)
+                self.run_worker(self._session(), exclusive=True, group="feed")   # replaces the old
+        self.push_screen(SourceScreen(self.feed), done)
+
+    def _adopt(self, feed: Feed) -> None:
+        """Make `feed` the input: forget the old receiver's state, keep the settings."""
+        self.feed = feed
+        self.sub_title = feed.label
+        self.gps = GpsState()
+        self.rx_bytes = 0
+        self.online = False
+        if self.raw_log is not None:
+            self._stop_log()                 # the log is named for the protocol
+        if isinstance(self.sink, SameLinkSink) and (
+                feed.protocol == "gpsd" or (feed.endpoint and feed.endpoint.kind == "file")):
+            self.stop_ntrip(announce=False)
+            self.note("NTRIP stopped: the new input cannot take corrections (press r)", "yellow")
+        self.note(f"Input: {feed.title} at {feed.label}", "bold")
+        self.refresh_views()
+
+    async def _ask(self, title: str, detail: str, *, can_wait: bool = False,
+                   retry_label: str = "Retry") -> str:
+        """The connection dialog.  "Configure another input" opens the source dialog; choosing
+        a source returns "retry" (with self.feed changed), cancelling shows this dialog again."""
+        while True:
+            choice = await self.push_screen_wait(
+                ConnectionScreen(title, detail, can_wait, retry_label))
+            if choice != "configure":
+                return choice
+            feed = await self.push_screen_wait(SourceScreen(self.feed))
+            if feed is not None:
+                self._adopt(feed)
+                return "retry"
+
     def _gga(self) -> bytes | None:
         """The rover's position as a GGA sentence, for a caster that wants it."""
         g = self.gps
@@ -331,12 +466,16 @@ class GpsView(App):
     # ------------------------------------------------------- feed session
     async def _session(self) -> None:
         """Connect, read, and reconnect. Every dialog is shown from here (it is a worker)."""
-        feed = self.feed
         while True:
+            feed = self.feed                 # may have been changed by "Configure another input"
             transport: Transport = feed.make_transport()
             self.decoder = feed.make_decoder()
             try:
-                await transport.open()
+                try:
+                    await transport.open()
+                except asyncio.CancelledError:      # the input was changed while connecting
+                    await transport.close()
+                    raise
                 self.transport = transport
                 command = self.decoder.on_open()
                 if command:
@@ -345,10 +484,10 @@ class GpsView(App):
                 self.transport = None
                 await transport.close()
                 self.note(f"Cannot connect to {feed.title}: {exc}", "red")
-                choice = await self.push_screen_wait(ConnectionScreen(
+                choice = await self._ask(
                     f"{feed.title} is not answering",
-                    f"{exc}\n\nIs the source running and reachable? ({feed.label})",
-                    can_wait=False))
+                    f"{exc}\n\nIs the source running and reachable? ({feed.label})\n"
+                    "You can retry, quit, or configure another input.")
             else:
                 self.note(f"Connected to {feed.title} at {feed.label}", "green")
                 try:
@@ -356,15 +495,15 @@ class GpsView(App):
                 except EndOfFile as exc:     # a replayed file ran out: not a failed link
                     self.online, self.transport = False, None
                     self.note(f"{exc}", "yellow")
-                    choice = await self.push_screen_wait(ConnectionScreen(
+                    choice = await self._ask(
                         "End of file", f"{exc}\n\nReplay starts again from the beginning.",
-                        can_wait=False, retry_label="Replay"))
+                        retry_label="Replay")
                 except OSError as exc:
                     self.online, self.transport = False, None    # no corrections to a dead link
                     self.note(f"Connection to {feed.title} lost: {exc}", "red")
-                    choice = await self.push_screen_wait(ConnectionScreen(
+                    choice = await self._ask(
                         f"Connection to {feed.title} was lost",
-                        f"{exc}\n\nLast device: {self.gps.device or '-'}", can_wait=False))
+                        f"{exc}\n\nLast device: {self.gps.device or '-'}")
                 finally:
                     self.transport = None            # before it closes: no corrections to it
                     await transport.close()
@@ -383,12 +522,12 @@ class GpsView(App):
                 if time.monotonic() - last >= STALL_SECONDS:
                     self.note(f"No data from {self.feed.title} for {STALL_SECONDS:.0f} s",
                               "yellow")
-                    choice = await self.push_screen_wait(ConnectionScreen(
+                    choice = await self._ask(
                         f"No data from {self.feed.title} for {STALL_SECONDS:.0f} s",
                         "It may have stopped, or the link hung. A receiver serves one "
                         "client at a time: if another phone or PC just connected, the "
-                        "stream moved to it.",
-                        can_wait=True))
+                        "stream moved to it. For a tty, check the baud rate.",
+                        can_wait=True)
                     if choice == "wait":
                         last = time.monotonic()
                         continue
