@@ -12,7 +12,7 @@ from .client import gpsd_feed, parse_source
 from .feeds import Feed
 from .nmea import nmea_feed
 from .swift import sbp_feed
-from .transports import DEFAULT_BAUD, FILE_RATE, parse_endpoint
+from .transports import FILE_RATE, parse_endpoint
 from .ubx import ubx_feed
 
 # (label for the dialog, protocol key)
@@ -53,20 +53,23 @@ def make_feed(protocol: str, spec: str, *, baud: str | int | None = None,
     if not spec:
         raise ValueError("give a source: /dev/ttyUSB0, host:port, udp://:port or a file")
     endpoint = parse_endpoint(spec, protocol)
+    suffix = ":" in spec.rpartition("/")[2]          # /dev/ttyUSB0:9600
     if rate is not None:
         if endpoint.kind != "serial":
             raise ValueError("a baud rate only applies to a tty (/dev/ttyUSB0), not to "
                              f"{endpoint.kind}")
-        if ":" in spec.rpartition("/")[2] and endpoint.baud != rate:
+        if suffix and endpoint.baud != rate:
             raise ValueError(f"the source says {endpoint.baud} baud and the baud setting says "
                              f"{rate}: give only one")
         endpoint = dataclasses.replace(endpoint, baud=rate)
     if is_auto(baud):
         if endpoint.kind != "serial":
             raise ValueError("automatic baud rate only applies to a tty (/dev/ttyUSB0)")
-        if ":" in spec.rpartition("/")[2]:
+        if suffix:
             raise ValueError("the source gives a baud rate, so there is nothing to detect: "
                              "drop the :RATE, or drop auto")
+    # A tty with no explicit rate is detected by listening; the protocol's default is tried first.
+    if endpoint.kind == "serial" and rate is None and not suffix:
         endpoint = dataclasses.replace(endpoint, autobaud=True)
     if endpoint.kind == "file":
         endpoint = dataclasses.replace(endpoint, rate=file_rate)
@@ -79,10 +82,6 @@ def baud_text(feed: Feed) -> str:
     if ep is None or ep.kind != "serial":
         return ""
     return AUTO if ep.autobaud else str(ep.baud)
-
-
-def default_baud(protocol: str) -> int:
-    return DEFAULT_BAUD.get(protocol, 0)
 
 
 def feed_spec(feed: Feed) -> str:

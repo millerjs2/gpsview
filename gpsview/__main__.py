@@ -25,8 +25,8 @@ Without gpsd:  -n SOURCE reads raw NMEA 0183,  -sbp SOURCE reads Swift Binary Pr
 -ubx SOURCE reads u-blox UBX.
 SOURCE is  /dev/ttyUSB0[:baud],  [tcp://]host:port,  udp://[host]:port,  or  a file
 (file:///path or a path to a regular file), which is replayed at serial speed.
-NMEA defaults to 9600 baud on a tty, SBP to 115200,
-UBX to 38400 (a ZED-F9; use /dev/ttyACM0:9600 for an M8 on its UART).
+On a tty the baud rate is detected by listening unless you give one (/dev/ttyUSB0:115200
+or -b 115200); the protocol's usual rate (NMEA 9600, SBP 115200, UBX 38400) is tried first.
 
 RTK corrections (off unless asked for): --ntrip [ntrip://|ntrips://][user[:pass]@]host[:port]/MOUNT
 pulls RTCM from an NTRIP caster and writes it to the receiver, on the data link ("same", the
@@ -64,9 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("-ubx", "--ubx", metavar="SOURCE",
                     help="read u-blox UBX from a tty, TCP, UDP or file, bypassing gpsd")
     ap.add_argument("-b", "--baud", metavar="RATE", default=None,
-                    help="baud rate for a tty source (default by protocol: NMEA 9600, SBP "
-                         "115200, UBX 38400); the same as /dev/ttyUSB0:RATE.  'auto' listens at "
-                         "the usual rates and picks the one that works (sends nothing)")
+                    help="baud rate for a tty source; the same as /dev/ttyUSB0:RATE.  Without "
+                         "one, gpsview listens at the usual rates and picks the one that "
+                         "works (it sends nothing); 'auto' says so explicitly")
     ap.add_argument("--file-rate", type=float, default=FILE_RATE, metavar="BYTES_PER_S",
                     help="replay speed for a file source (default %(default)g, 115200 baud; "
                          "0 = as fast as possible)")

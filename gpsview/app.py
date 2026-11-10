@@ -32,7 +32,7 @@ from .model import GpsState
 from .nmea import gga_sentence
 from .ntrip import NtripConfig, NtripSession, make_setup
 from .autobaud import detect_baud
-from .sources import PROTOCOLS, baud_text, default_baud, feed_spec, find_ttys, make_feed
+from .sources import PROTOCOLS, baud_text, feed_spec, find_ttys, make_feed
 from .transports import FILE_RATE, EndOfFile, Transport
 from .views import UNITS, StateTimer, ViewOpts
 
@@ -132,7 +132,7 @@ class SourceScreen(ModalScreen["Feed | None"]):
             yield Label("Source", id="src_label")
             yield Input(spec, id="src_spec")
             yield Static("", id="src_hint")
-            yield Label("Baud rate  (tty only; blank = default, auto = detect by listening)")
+            yield Label("Baud rate  (tty only; blank or auto = detect by listening)")
             yield Input(baud, id="src_baud")
             yield Static("", id="src_ports")
             yield Static("", id="src_error")
@@ -153,7 +153,7 @@ class SourceScreen(ModalScreen["Feed | None"]):
         else:
             label = "Source"
             hint = "/dev/ttyUSB0[:baud]   host:port   udp://:port   or a file to replay"
-            self.query_one("#src_baud", Input).placeholder = f"{default_baud(str(protocol))}"
+            self.query_one("#src_baud", Input).placeholder = "auto"
         self.query_one("#src_label", Label).update(label)
         self.query_one("#src_hint", Static).update(Text(hint, style="dim"))
 

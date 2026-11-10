@@ -44,12 +44,12 @@ Python 3.14. The `sbp` package decodes SBP payloads; `pyserial` opens ttys.
     bin/gpsview -r                      # start on the RTK tab
     # press r in the app to set up NTRIP corrections (see "NTRIP" below)
     bin/gpsview -sbp tcp://10.0.0.7:55555   # Swift Binary Protocol over TCP
-    bin/gpsview -sbp /dev/ttyUSB0       # SBP on a serial port, 115200 baud
-    bin/gpsview -ubx /dev/ttyACM0       # u-blox UBX on a serial port, 38400 baud
+    bin/gpsview -sbp /dev/ttyUSB0       # SBP on a serial port, baud rate detected
+    bin/gpsview -ubx /dev/ttyACM0       # u-blox UBX on a serial port
     bin/gpsview -ubx tcp://10.0.0.7:5000
     bin/gpsview -ubx capture.ubx        # replay a file at serial speed
-    bin/gpsview -n /dev/ttyACM0         # NMEA on a serial port, 9600 baud
-    bin/gpsview -ubx /dev/ttyUSB0 -b 115200     # any baud rate: -b/--baud, or /dev/ttyUSB0:115200
+    bin/gpsview -n /dev/ttyACM0         # NMEA on a serial port
+    bin/gpsview -ubx /dev/ttyUSB0 -b 115200     # fixed rate, no scan: -b/--baud, or /dev/ttyUSB0:115200
     bin/gpsview -n udp://:10110         # NMEA datagrams on UDP port 10110
     bin/gpsview -ubx /dev/ttyACM0 --ntrip me@caster.example.com/MOUNT   # RTK, see below
     bin/gpsview --ntrip-list caster.example.com                         # what a caster offers
@@ -178,10 +178,10 @@ Details that differ from the Swift source:
 
 ### Source forms
 
-| Form | Meaning | Default baud |
+| Form | Meaning | Baud |
 | --- | --- | --- |
-| `/dev/ttyUSB0` | serial tty | NMEA 9600, SBP 115200, UBX 38400 |
-| `/dev/ttyUSB0:4800` | serial tty at a given baud | |
+| `/dev/ttyUSB0` | serial tty | detected by listening (see below) |
+| `/dev/ttyUSB0:4800` | serial tty at a given baud | 4800 |
 | `host:port` or `tcp://host:port` | TCP client | |
 | `udp://host:port` | UDP: bind `host` (a local address) and read | |
 | `udp://:port` | UDP on all interfaces | |
@@ -191,15 +191,15 @@ Details that differ from the Swift source:
 A serial tty needs read access to the device, usually membership of the `dialout` (or
 `uucp`) group (and write access too, if it is also where corrections go).
 
-The UBX default of 38400 is a ZED-F9 on UART1. An M8 on its UART is 9600: use
-`-ubx /dev/ttyACM0:9600`. A native USB port (ttyACM) ignores the baud rate, but a USB-to-serial
-adapter (ttyUSB) does not. Set the rate with `-b RATE` / `--baud RATE` (50 to 4000000) or with
-the `:RATE` suffix; giving both with different values is an error, and so is a baud rate for
-a network source.
+Without a rate, a tty is detected automatically. To skip the scan, set the rate with
+`-b RATE` / `--baud RATE` (50 to 4000000) or the `:RATE` suffix. A native USB port (ttyACM) ignores the baud rate, but a USB-to-serial
+adapter (ttyUSB) does not. Giving both a suffix and `-b` with different values is an error,
+and so is a baud rate for a network source.
 
-**Auto-detecting the baud rate:** `-b auto` (or `auto` in the input dialog's baud field) listens
-at 115200, the protocol's default, 38400, 9600, 57600, 19200, 4800, 230400, 460800 and 921600
-in turn, for up to 2 s each, and uses the first rate that yields two valid frames (NMEA
+**Auto-detecting the baud rate** is the default for a tty with no rate given (`-b auto`, or a
+blank or `auto` baud field in the input dialog, say it explicitly). It listens at the protocol's
+usual rate first (NMEA 9600, SBP 115200, UBX 38400), then 115200, 38400, 9600, 57600, 19200, 4800,
+230400, 460800 and 921600, in turn, for up to 2 s each, and uses the first rate that yields two valid frames (NMEA
 sentences with a good checksum, UBX frames with a good checksum, SBP frames with a good CRC).
 Noise does not pass those checks, so a wrong rate is not mistaken for a right one. Nothing is
 sent to the receiver. It needs the receiver to be sending something: if no rate works the

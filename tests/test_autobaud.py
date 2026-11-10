@@ -168,7 +168,9 @@ def test_auto_on_a_tty_marks_the_endpoint():
     f = make_feed("ubx", "/dev/ttyUSB0", baud="auto")
     assert f.endpoint.autobaud and baud_text(f) == "auto"
     assert make_feed("ubx", "/dev/ttyUSB0", baud="AUTO").endpoint.autobaud
-    assert not make_feed("ubx", "/dev/ttyUSB0").endpoint.autobaud
+    assert make_feed("ubx", "/dev/ttyUSB0").endpoint.autobaud            # the default now
+    assert not make_feed("ubx", "/dev/ttyUSB0:9600").endpoint.autobaud
+    assert not make_feed("ubx", "/dev/ttyUSB0", baud=9600).endpoint.autobaud
     assert baud_text(make_feed("ubx", "/dev/ttyUSB0:9600")) == "9600"
     assert baud_text(make_feed("ubx", "10.0.0.1:5000")) == ""
 
@@ -241,7 +243,7 @@ def test_stall_dialog_offers_auto_baud_for_a_tty_and_it_works(monkeypatch):
         master, slave = os.openpty()
         tty = os.ttyname(slave)                                  # silent at first
         try:
-            app = GpsView(make_feed("ubx", tty))
+            app = GpsView(make_feed("ubx", tty, baud="38400"))     # explicit: no scan at start
             async with app.run_test(size=(80, 24)) as pilot:
                 assert await wait_for(lambda: isinstance(app.screen, ConnectionScreen))
                 await pilot.pause(0.3)
