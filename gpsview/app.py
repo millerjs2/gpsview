@@ -489,7 +489,7 @@ class GpsView(App):
                                             ("Last", "last"))),
                                ("#rtcm_counts", (("RTCM", "type"), ("Name", "name"),
                                                  ("In", "in"), ("Out", "out"),
-                                                 ("Last in", "last")))):
+                                                 ("Used", "used"), ("Last in", "last")))):
             for label, key in columns:
                 self.query_one(table, DataTable).add_column(label, key=key)
         self.note(f"Connecting to {self.feed.title} at {self.feed.label}")
@@ -760,8 +760,10 @@ class GpsView(App):
         if s is None:
             return []
         now = time.monotonic()
+        reported = getattr(self.decoder, "rtcm_types", {})   # the receiver's own verdicts
         return [(str(t), describe(t), str(s.types[t]), str(s.types_out.get(t, 0)),
-                 _age(s.seen_in.get(t), now)) for t in sorted(s.types)]
+                 str(reported[t][1]) if t in reported else "-", _age(s.seen_in.get(t), now))
+                for t in sorted(s.types)]
 
     def refresh_counts(self) -> None:
         try:
@@ -776,7 +778,7 @@ class GpsView(App):
         self._fill(base.query_one("#counts", DataTable), self._receiver_rows(), "receiver",
                    ("count", "last"))
         self._fill(base.query_one("#rtcm_counts", DataTable), self._rtcm_rows(), "rtcm",
-                   ("in", "out", "last"))
+                   ("in", "out", "used", "last"))
 
     def _fill(self, table: DataTable, rows: list[tuple[str, ...]], which: str,
               live: tuple[str, ...]) -> None:

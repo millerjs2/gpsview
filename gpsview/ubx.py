@@ -10,7 +10,9 @@ Messages used (layouts checked against gpsd's drivers/driver_ubx.c):
     NAV-SAT        0x01 0x35  satellites: elevation, azimuth, C/N0, used (version 1)
     NAV-SIG        0x01 0x43  signals: C/N0, used, health, signal name (version 0)
     NAV-RELPOSNED  0x01 0x3C  RTK: this receiver relative to the base (versions 0 and 1)
-    RXM-RTCM       0x02 0x32  the receiver reporting RTCM corrections it received
+    RXM-RTCM       0x02 0x32  the receiver reporting RTCM corrections it received (M8P and
+                              similar)
+    RXM-COR        0x02 0x34  the same report from F9 receivers: protocol, error, used, type
 Every other message is listed in the message pane as one line.
 
 u-blox receivers send NMEA by default, and a base station may send RTCM 3, on the same
@@ -63,7 +65,7 @@ NAMES = {
     (0x01, 0x22): "NAV-CLOCK", (0x01, 0x26): "NAV-TIMELS", (0x01, 0x30): "NAV-SVINFO",
     (0x01, 0x35): "NAV-SAT", (0x01, 0x3C): "NAV-RELPOSNED", (0x01, 0x3D): "NAV-EELL",
     (0x01, 0x43): "NAV-SIG", (0x01, 0x61): "NAV-EOE", (0x02, 0x13): "RXM-SFRBX",
-    (0x02, 0x15): "RXM-RAWX", (0x02, 0x32): "RXM-RTCM", (0x05, 0x00): "ACK-NAK",
+    (0x02, 0x15): "RXM-RAWX", (0x02, 0x32): "RXM-RTCM", (0x02, 0x34): "RXM-COR", (0x05, 0x00): "ACK-NAK",
     (0x05, 0x01): "ACK-ACK", (0x0A, 0x04): "MON-VER", (0x0A, 0x09): "MON-HW",
     (0x0A, 0x28): "MON-HW3", (0x10, 0x15): "ESF-INS", (0x10, 0x02): "ESF-MEAS",
 }
@@ -161,6 +163,7 @@ class UbxDecoder:
         self.rtcm_ok = 0              # RXM-RTCM: corrections the receiver accepted
         self.rtcm_failed = 0          # ... and the ones that failed their CRC
         self.rtcm_last: tuple[int, bool, int] | None = None   # (message type, crc ok, msgUsed)
+        self.rtcm_types: dict[int, list[int]] = {}   # type -> [ok, used, failed] as the receiver reports
         self._time: str | None = None
         self._pos: dict = {"mode": MODE_NO_FIX}
         self._base: dict = {}
@@ -254,7 +257,8 @@ class UbxDecoder:
                    (0x01, 0x3C): self._nav_relposned,
                    (0x01, 0x01): self._nav_posecef, (0x01, 0x11): self._nav_velecef,
                    (0x01, 0x13): self._nav_hpposecef, (0x01, 0x14): self._nav_hpposllh,
-                   (0x02, 0x32): self._rxm_rtcm}.get((msg_class, msg_id))
+                   (0x02, 0x32): self._rxm_rtcm, (0x02, 0x34): self._rxm_cor}.get(
+                       (msg_class, msg_id))
         if handler is None:
             events.append(raw(text, msg=name))
             return "ok"
@@ -267,7 +271,7 @@ class UbxDecoder:
             events.append(raw(text + " (ignored)", msg=name))
             return "ok"
         style = "dim"
-        if (msg_class, msg_id) == (0x02, 0x32) and self.rtcm_last:
+        if (msg_class, msg_id) in ((0x02, 0x32), (0x02, 0x34)) and self.rtcm_last:
             msg_type, crc_ok, used = self.rtcm_last
             text += (f": RTCM {msg_type} " + ("crc ok" if crc_ok else "CRC FAILED")
                      + {1: ", not used", 2: ", used"}.get(used, ""))
@@ -469,18 +473,44 @@ class UbxDecoder:
         return [self._tpv_event(), obj(att)]
 
     def _rxm_rtcm(self, p: bytes) -> list[Event] | None:
+        self.rtcm_last = None
         if len(p) < 8:
             return None
         flags = p[1]
         msg_type = struct.unpack_from("<H", p, 6)[0]
         crc_ok = not flags & 0x01
         used = (flags >> 1) & 3                          # 0 unknown, 1 not used, 2 used
+        self._rtcm_report(msg_type, crc_ok, used)
+        return []                                        # shown in the raw line, no state
+
+    def _rxm_cor(self, p: bytes) -> list[Event] | None:
+        """RXM-COR (F9 and later, which replaced RXM-RTCM): the receiver's verdict on each
+        correction message it was sent: protocol, error status, used or not, message type."""
+        self.rtcm_last = None
+        if len(p) < 12 or p[0] != 1:
+            return None
+        status, msg_type = struct.unpack_from("<IH", p, 4)
+        if status & 0x1f != 1:                           # not RTCM 3 (SPARTN, L6, ...)
+            return []
+        err, used_bits = (status >> 5) & 3, (status >> 7) & 3     # 0 unknown, 1 no error / not used
+        type_valid = bool(status & 0x02000000)
+        if err == 0:                                     # no verdict on the CRC: nothing to count
+            return []
+        # RXM-RTCM's msgUsed: 1 not used, 2 used (0 unknown); here the same two bits
+        self._rtcm_report(msg_type if type_valid else 0, err == 1, used_bits)
+        return []
+
+    def _rtcm_report(self, msg_type: int, crc_ok: bool, used: int) -> None:
         if crc_ok:
             self.rtcm_ok += 1
         else:
             self.rtcm_failed += 1
         self.rtcm_last = (msg_type, crc_ok, used)
-        return []                                        # shown in the raw line, no state
+        if msg_type:
+            row = self.rtcm_types.setdefault(msg_type, [0, 0, 0])
+            row[0 if crc_ok else 2] += 1
+            if crc_ok and used == 2:
+                row[1] += 1
 
     # gpsd-shaped output ----------------------------------------------------
     def _tpv_event(self) -> Event:

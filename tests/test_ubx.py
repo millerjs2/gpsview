@@ -565,3 +565,43 @@ def test_real_high_precision_capture_matches_gpsd():
         assert a["lon"] == pytest.approx(b["lon"], abs=2e-9)
         assert a["altHAE"] == pytest.approx(b["altHAE"], abs=1.5e-3)             # gpsd scales the
         assert a["altMSL"] == pytest.approx(b["altMSL"], abs=1.5e-3)             # 0.1 mm digit by 1e-5
+
+
+# ----------------------------------------------------------------- RXM-COR (F9: RTCM verdicts)
+def rxm_cor(msg_type=1077, proto=1, err=1, used=2, valid=True, version=1):
+    status = proto | err << 5 | used << 7 | (0x02000000 if valid else 0)
+    return make_frame(0x02, 0x34, struct.pack("<BBHIHH", version, 0, 0, status, msg_type, 0))
+
+
+def test_rxm_cor_reports_what_the_receiver_did_with_each_rtcm_message():
+    dec = UbxDecoder("t")
+    ev = dec.feed(rxm_cor(1077) + rxm_cor(1077) + rxm_cor(1230, used=1) + rxm_cor(1087, err=2))
+    assert (dec.rtcm_ok, dec.rtcm_failed) == (3, 1)
+    assert dec.rtcm_types == {1077: [2, 2, 0], 1230: [1, 0, 0], 1087: [0, 0, 1]}
+    lines = [e.text for e in ev if e.kind == "raw"]
+    assert lines[0].endswith("RXM-COR 0x0234 12 bytes: RTCM 1077 crc ok, used"), lines[0]
+    assert "not used" in lines[2] and "CRC FAILED" in lines[3]
+
+
+def test_rxm_cor_ignores_other_protocols_unknown_status_and_other_versions():
+    dec = UbxDecoder("t")
+    ev = dec.feed(rxm_cor(1077, proto=2) + rxm_cor(1077, err=0) + rxm_cor(1077, version=2))
+    assert (dec.rtcm_ok, dec.rtcm_failed, dec.rtcm_types) == (0, 0, {})
+    assert not any("RTCM 1077" in e.text for e in ev if e.kind == "raw")      # no stale verdict
+
+
+def test_rxm_cor_without_a_valid_type_counts_but_has_no_type_row():
+    dec = UbxDecoder("t")
+    dec.feed(rxm_cor(0, valid=False))
+    assert dec.rtcm_ok == 1 and dec.rtcm_types == {}
+
+
+def test_real_f9p_rxm_cor_frames():
+    """Frames from a ZED-F9P being fed RTCM 3: all RTCM3, no error, used."""
+    path = os.path.join(os.path.dirname(__file__), "data", "zed-f9p-rxm-cor.ubx")
+    dec = UbxDecoder("t")
+    ev = dec.feed(open(path, "rb").read())
+    assert dec.errors == 0 and dec.rtcm_ok == 12 and dec.rtcm_failed == 0
+    assert all(used == ok for ok, used, bad in dec.rtcm_types.values())
+    assert {1077, 1087} <= dec.rtcm_types.keys()
+    assert all("RXM-COR" in e.text for e in ev if e.kind == "raw") and ev

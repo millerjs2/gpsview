@@ -94,7 +94,8 @@ still show. **Counts** (key `5`; `4` goes back) is two tables side by side: what
 has sent, by message (`NAV-PVT`, `GNGGA`, `PosLLH`, gpsd's `TPV`, ...) with a count and how long
 ago the last one arrived, and, when NTRIP is on, the RTCM corrections by message type, with how
 many came **in** from the caster and how many went **out** to the receiver, and the age of the
-last one. Common types are named (`1077 GPS MSM7`, `1230 GLONASS code-phase biases`). The
+last one, and, when the receiver reports on the corrections it was sent (RXM-COR, RXM-RTCM), how
+many of each type it **used**. Common types are named (`1077 GPS MSM7`, `1230 GLONASS code-phase biases`). The
 counts are for the current input and the current NTRIP session; `c` on this tab resets them.
 
 ![The Counts tab](docs/screenshots/counts.svg)
@@ -160,7 +161,7 @@ Messages used:
 | NAV-SAT 0x0135 | satellites: elevation, azimuth, C/N0, used in the solution, health |
 | NAV-SIG 0x0143 | one table row per signal, with the signal name (`L1CA`, `L2CL`, `E1B`, `B1ID1` ...), its C/N0, and whether it is used |
 | NAV-RELPOSNED 0x013C | RTK base: status, East, North, Up, length, course, station id (version 0, and version 1 with heading) |
-| RXM-RTCM 0x0232 | what the receiver did with the corrections it was sent: type, CRC ok or failed, used or not |
+| RXM-RTCM 0x0232 (M8P), RXM-COR 0x0234 (F9P and other F9) | what the receiver did with each correction message it was sent: type, CRC ok or failed, used or not. RXM-COR is what an F9 sends, and it needs to be enabled (CFG-MSGOUT-UBX_RXM_COR) |
 
 Other messages are listed in the message pane as one line each, for example
 `UBX NAV-STATUS 0x0103 16 bytes`. The ECEF and high-precision messages are not on by default: enable
@@ -325,7 +326,7 @@ itself: `gpsd ntrip://...`) and for **files**.
 
 The receiver must be set to accept RTCM 3 on that port (`CFG-UART1INPROT-RTCM3X` or the
 USB equivalent for a u-blox). gpsview does not change receiver settings. With UBX, the
-receiver confirms what it got: `RXM-RTCM` lines in the message pane (`1077 crc ok, used`) and
+receiver confirms what it got: `RXM-RTCM` or `RXM-COR` lines in the message pane (`RTCM 1077 crc ok, used`) and
 `receiver: RTCM ok N bad N` in the status bar. That is the quickest way to tell that the
 corrections arrived and were accepted.
 
@@ -547,8 +548,11 @@ the fake caster. NTRIP was also run live against two public/commercial casters (
 with a single-base mountpoint) with the corrections sent to a Swift receiver's RTCM input on a
 separate TCP port while the data was read as SBP on another: no CRC errors, destination up,
 correction age 0 to 1 s, and the receiver reporting RTK fixed, and RTK was switched off and on
-by stopping and starting the NTRIP session. A u-blox receiver has not been tried live, so UBX
-(including the RXM-RTCM feedback) is checked only against gpsd's captures.
+by stopping and starting the NTRIP session. A ZED-F9P on a USB-serial adapter was run live too,
+with the baud rate detected and the corrections going back on the same tty: it reported RTK
+fixed within seconds. RXM-COR was checked against frames from that receiver, in
+`tests/data/zed-f9p-rxm-cor.ubx` (correction status only: no position). RXM-RTCM (M8P and
+similar) is checked only against synthetic frames.
 
 ## License
 

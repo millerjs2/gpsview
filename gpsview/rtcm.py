@@ -50,12 +50,12 @@ def make_frame(payload: bytes) -> bytes:
 
 _SYSTEMS = {107: "GPS", 108: "GLONASS", 109: "Galileo", 110: "SBAS", 111: "QZSS", 112: "BeiDou",
             113: "NavIC"}
-_NAMES = {1004: "GPS L1/L2 observations", 1005: "Station ARP", 1006: "Station ARP + height",
-          1007: "Antenna descriptor", 1008: "Antenna descriptor + serial",
-          1012: "GLONASS L1/L2 observations", 1019: "GPS ephemeris", 1020: "GLONASS ephemeris",
-          1033: "Receiver and antenna descriptors", 1042: "BeiDou ephemeris",
-          1044: "QZSS ephemeris", 1045: "Galileo F/NAV ephemeris",
-          1046: "Galileo I/NAV ephemeris", 1230: "GLONASS code-phase biases",
+_NAMES = {1004: "GPS L1/L2 obs", 1005: "Station ARP", 1006: "Station ARP+height",
+          1007: "Antenna desc", 1008: "Antenna desc+serial",
+          1012: "GLONASS L1/L2 obs", 1019: "GPS ephemeris", 1020: "GLONASS ephemeris",
+          1033: "Rx/antenna desc", 1042: "BeiDou ephemeris",
+          1044: "QZSS ephemeris", 1045: "Galileo F/NAV eph",
+          1046: "Galileo I/NAV eph", 1230: "GLONASS biases",
           4072: "u-blox proprietary"}
 
 

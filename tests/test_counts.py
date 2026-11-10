@@ -31,7 +31,7 @@ def test_describe_names_common_rtcm_messages():
     assert describe(1005) == "Station ARP"
     assert describe(1077) == "GPS MSM7" and describe(1124) == "BeiDou MSM4"
     assert describe(1087) == "GLONASS MSM7" and describe(1097) == "Galileo MSM7"
-    assert describe(1230) == "GLONASS code-phase biases"
+    assert describe(1230) == "GLONASS biases"
     assert describe(1070) == "" and describe(9999) == ""
 
 
@@ -94,12 +94,13 @@ def test_counts_include_rtcm_in_and_out_and_keep_counting():
                 first = sum(int(r[2]) for r in rows.values())
                 assert await wait_for(lambda: sum(int(r[2]) for r in rtcm_rows(app))
                                       > first + 8, tries=200)             # live updates
-                for _type, _name, got, sent, last in rtcm_rows(app):
+                for _type, _name, got, sent, used, last in rtcm_rows(app):
+                    assert used == "-"                                     # no receiver verdicts here
                     assert 0 <= int(got) - int(sent) <= 2                  # out follows in
                     assert last.endswith(" s")
                 t = app.screen_stack[0].query_one("#rtcm_counts", DataTable)
                 assert [str(c.label) for c in t.columns.values()] == [
-                    "RTCM", "Name", "In", "Out", "Last in"]
+                    "RTCM", "Name", "In", "Out", "Used", "Last in"]
         finally:
             await rx.stop()
             await caster.stop()
@@ -187,4 +188,32 @@ def test_switching_input_clears_the_receiver_counts():
                 assert app.msg_counts == {}
         finally:
             await rx.stop()
+    run(scenario())
+
+
+def test_used_column_and_status_report_follow_the_receivers_rxm_cor():
+    from tests.test_ubx import rxm_cor
+    from tools.fake_feeds import ubx_epoch
+
+    def epoch(now):                                    # a receiver that reports on every message
+        return ubx_epoch(now, True) + b"".join(rxm_cor(t) for t in (1005, 1077, 1087, 1230))
+
+    async def scenario():
+        caster = FakeCaster(rate=0.05)
+        cport = await caster.start()
+        rx = FakeFeed(epoch, rate=0.1)
+        rport = await rx.tcp()
+        try:
+            app = make_app(f"127.0.0.1:{rport}", cport)
+            async with app.run_test(size=(100, 40)) as pilot:
+                await pilot.press("5")
+                assert await wait_for(lambda: len(rtcm_rows(app)) == 4
+                                      and all(r[4] != "-" for r in rtcm_rows(app)), tries=200)
+                for _type, _name, got, sent, used, _last in rtcm_rows(app):
+                    assert int(used) >= 1
+                assert await wait_for(lambda: "receiver: RTCM ok" in app._ntrip_line())
+                assert {"RXM-COR"} <= {r[0] for r in table_rows(app)}
+        finally:
+            await rx.stop()
+            await caster.stop()
     run(scenario())
