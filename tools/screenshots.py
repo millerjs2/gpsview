@@ -67,7 +67,6 @@ async def sbp_shots(spec: str) -> None:
     sport = server.sockets[0].getsockname()[1]
     try:
         app = GpsView(feed)
-        app.theme = "nord"
         async with app.run_test(size=SIZE) as pilot:
             assert await wait_for(lambda: app.gps.fix.mode >= 2 and app.gps.sats), "no data"
             await pilot.pause(3)
@@ -102,7 +101,6 @@ async def ubx_shot(path: str) -> None:
         ep = dataclasses.replace(parse_endpoint(name, "ubx"), rate=0)
         feed = ubx_feed(ep)
         app = GpsView(disguised(feed, "file://zed-f9p.ubx"))
-        app.theme = "nord"
         async with app.run_test(size=SIZE) as pilot:
             assert await wait_for(lambda: app.gps.fix.mode >= 2 and len(app.gps.sats) > 10)
             await pilot.pause(2)

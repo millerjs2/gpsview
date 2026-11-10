@@ -293,6 +293,7 @@ class GpsView(App):
 
     # ----------------------------------------------------------- startup
     def on_mount(self) -> None:
+        self.theme = "nord"                    # the default; Ctrl+P changes it
         self.query_one("#sats", DataTable).add_columns("GNSS", "Sig", "PRN", "Elev", "Azim",
                                                        "SNR", "Use")
         self.query_one("#datawin").border_title = "GNSS"

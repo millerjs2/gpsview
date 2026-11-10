@@ -380,6 +380,8 @@ These are the places where a source does not give what the view shows. Each show
 
 ## Layout and style
 
+The default theme is `nord`; change it from the command palette (Ctrl+P).
+
 The app follows the author's tuiStyle template (a Textual layout guide):
 
 * header, a 3-line status bar on `$boost`, and tabs, with a message pane and a footer
@@ -496,3 +498,8 @@ separate TCP port while the data was read as SBP on another: no CRC errors, dest
 correction age 0 to 1 s, and the receiver reporting RTK fixed, and RTK was switched off and on
 by stopping and starting the NTRIP session. A u-blox receiver has not been tried live, so UBX
 (including the RXM-RTCM feedback) is checked only against gpsd's captures.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The number and coordinate formatting in `gpsview/fmt.py` is
+ported from gpsd (BSD-2-Clause), which is compatible.
