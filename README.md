@@ -72,9 +72,10 @@ gpsd server, `-n`, `-sbp`, or `-ubx`.
 | `o` | Input: choose the protocol, source and baud rate (see [below](#choosing-the-input-in-the-app)) |
 | `r` | RTK corrections: set up, start or stop NTRIP (see [below](#ntrip-rtk-corrections)) |
 | `s` | Raw messages on or off |
-| `c` | Clear the raw pane |
+| `c` | Clear the pane shown below: the messages, or the counts |
 | `w` | Start or stop logging the raw data to a file |
 | `1` `2` `3` | GNSS, IMU, RTK tab (the tabs are also clickable) |
+| `4` `5` | Lower pane: Messages, Counts |
 
 The GNSS tab has the cgps data panel on the left and the satellite table on the
 right. The table lists used satellites first, then by PRN. Its title shows
@@ -86,10 +87,17 @@ elevation and azimuth. The count is still one satellite. The `Sig` column is the
 name for SBP, and gpsd's signal id (as cgps shows it) for gpsd. NMEA has no signal
 column.
 
-The bottom pane is the **messages** pane: the raw messages from the source (dim: gpsd
-JSON, NMEA sentences, or one summary line per SBP frame), and notices in colour:
-connection state, the protocol in use, and warnings. `s` turns the raw messages off;
-notices still show.
+The bottom pane has two tabs. **Messages** shows the raw messages from the source (dim: gpsd
+JSON, NMEA sentences, or one summary line per SBP or UBX frame), and notices in colour:
+connection state, the protocol in use, and warnings. `s` turns the raw messages off; notices
+still show. **Counts** (key `5`; `4` goes back) is two tables side by side: what the receiver
+has sent, by message (`NAV-PVT`, `GNGGA`, `PosLLH`, gpsd's `TPV`, ...) with a count and how long
+ago the last one arrived, and, when NTRIP is on, the RTCM corrections by message type, with how
+many came **in** from the caster and how many went **out** to the receiver, and the age of the
+last one. Common types are named (`1077 GPS MSM7`, `1230 GLONASS code-phase biases`). The
+counts are for the current input and the current NTRIP session; `c` on this tab resets them.
+
+![The Counts tab](docs/screenshots/counts.svg)
 
 ## Sources
 
@@ -145,6 +153,9 @@ Messages used:
 | Message | Shown as |
 | --- | --- |
 | NAV-PVT 0x0107 | fix, time, position, altitude (HAE and MSL), speed, track, climb, accuracies, magnetic variation, and the RTK state (DGPS, RTK float, RTK fixed) |
+| NAV-HPPOSLLH 0x0114 | high-precision lat/lon (1e-9 degree) and altitude (0.1 mm), with horizontal and vertical accuracy; replaces the NAV-PVT position of the same epoch |
+| NAV-HPPOSECEF 0x0113, NAV-POSECEF 0x0101 | the ECEF X, Y, Z rows (to 0.1 mm with the high-precision message) |
+| NAV-VELECEF 0x0111 | the ECEF velocity (VX, VY, VZ) |
 | NAV-DOP 0x0104 | PDOP, HDOP, VDOP, TDOP, GDOP |
 | NAV-SAT 0x0135 | satellites: elevation, azimuth, C/N0, used in the solution, health |
 | NAV-SIG 0x0143 | one table row per signal, with the signal name (`L1CA`, `L2CL`, `E1B`, `B1ID1` ...), its C/N0, and whether it is used |
@@ -152,7 +163,10 @@ Messages used:
 | RXM-RTCM 0x0232 | what the receiver did with the corrections it was sent: type, CRC ok or failed, used or not |
 
 Other messages are listed in the message pane as one line each, for example
-`UBX NAV-POSECEF 0x0101 20 bytes`.
+`UBX NAV-STATUS 0x0103 16 bytes`. The ECEF and high-precision messages are not on by default: enable
+NAV-HPPOSLLH, NAV-HPPOSECEF (or NAV-POSECEF) and NAV-VELECEF on the port in u-center
+(CFG-MSGOUT) to fill the ECEF rows and get the extra digits. Without them the position is
+NAV-PVT's (1e-7 degree, 1 mm) and the ECEF rows show `n/a`.
 
 A u-blox sends NMEA by default on the same port, and a base station may send RTCM 3. Both
 are stepped over without counting errors, and shown in the message pane (`$GNGGA,...`,
@@ -329,11 +343,11 @@ corrections arrived and were accepted.
   rejected password (401, 403), a wrong mountpoint (the caster answers with its sourcetable) or
   a redirect: it says why once and stops. The receiver display keeps working.
 * **A fourth status line** appears when NTRIP is on:
-  `ntrip MOUNT streaming  -> same link up  receiver: RTCM ok 9 bad 0  age 0 s  rx 12.3 kB  1005 1077 1087 1230  out 12.1 kB`.
-  `age` is the time since the last whole RTCM frame, and the numbers are RTCM message types.
-  The line is cut to the terminal width from the right: the message types, the bytes sent and
-  the bytes received go first, so at 80 columns the state, the destination, the receiver's
-  report and the age remain. `dropped N kB` replaces `out` when the destination was down.
+  `ntrip MOUNT streaming  -> same link up  receiver: RTCM ok 9 bad 0  age 0 s  rx 12.3 kB  out 12.1 kB`.
+  `age` is the time since the last whole RTCM frame. The message types are in the Counts tab,
+  not here, so the line fits 100 columns. It is cut to the terminal width from the right:
+  the bytes sent and then the bytes received go first, so at 80 columns the state, the
+  destination, the receiver's report and the age remain. `dropped N kB` replaces `out` when the destination was down.
 * `--ntrip-list` removes control characters from what the caster sent before printing it.
 
 Not supported: NTRIP digest authentication, following redirects, client certificates,
@@ -390,9 +404,9 @@ These are the places where a source does not give what the view shows. Each show
 * **SBP**: no heading or attitude (the ORIENT messages are not decoded), so the ATT box
   on the IMU tab is empty. IMU_RAW (0x0900) is not decoded, so the IMU tab is empty too.
   No MSL altitude (POS_LLH gives HAE only), no ECEF, no leap seconds.
-* **UBX**: no IMU (ESF is not decoded), no ECEF, no leap seconds, no correction age
+* **UBX**: no IMU (ESF is not decoded), no leap seconds, no correction age
   (NAV-PVT does not carry it), no NAV-SVINFO (u-blox 6 and 7 have no NAV-SAT: the satellite
-  table stays empty and the message pane lists what does arrive), no NAV-HPPOSLLH. Heading and
+  table stays empty and the message pane lists what does arrive). Heading and
   the RTK tab need NAV-RELPOSNED, which only the F9P/F9H/M8P and similar send. The track is
   NAV-PVT's heading of motion, which is meaningless when standing still.
 * **Used satellites** mean something different for each source:
@@ -429,9 +443,9 @@ Changes from the template, which are deliberate:
   writes is RTCM from `--ntrip`, which is opt-in on the command line (so there is no confirm
   dialog) and is not a setting (so there is nothing to read back). The bindings are cgps's,
   not `g`/`p`/`c`.
-* **The message pane is shared.** The style's command log is replaced by one pane
-  holding raw data and notices, as cgps's messages window does. It takes the rows left
-  over after the tabs (at least 5), so 80x24 terminals still show data.
+* **The lower pane is shared.** The style's command log is replaced by a Messages tab holding
+  raw data and notices, as cgps's messages window does, beside a Counts tab. It takes the rows
+  left over after the tabs (at least 6 rows of content), so 80x24 terminals still show data.
 
 ## Differences from cgps
 
@@ -511,7 +525,7 @@ cgps is the reference. These are the places where gpsview differs on purpose.
   encoding, wrong credentials, wrong mountpoint, sourcetable, VRS, reconnects, and that the
   forwarded RTCM is byte-exact and whole-frame. `test_corrections.py` covers the sinks.
   `test_autobaud.py` covers frame scoring, the scan (with a fake receiver that is only readable at
-  its true rate), and the dialogs. `test_input_dialog.py` covers the baud rate and the input dialog (from the connection dialog and
+  its true rate), and the dialogs. `test_counts.py` covers the Counts tab. `test_input_dialog.py` covers the baud rate and the input dialog (from the connection dialog and
   the `o` key). `test_ntrip_dialog.py` drives the RTK dialog and the footer at 100x40.
   `test_ntrip_app.py` runs the app with a fake receiver and a fake caster, with corrections on
   the data link (TCP, pty, UDP), on a separate interface, across a reconnect, and checks the

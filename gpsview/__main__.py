@@ -42,7 +42,7 @@ input" when the source cannot be reached) to pick the protocol, source and baud 
 
 Keys (same as cgps): h help, q quit, o input, d lat/lon format, i/m/n units, t true or
 magnetic track, s raw messages on or off, w log raw data to a file on or off,
-c clear the raw pane, 1/2/3 GNSS/IMU/RTK tabs.
+c clear the messages or counts, 1/2/3 GNSS/IMU/RTK tabs, 4/5 Messages/Counts.
 
 The raw data log is named gpsview_<protocol>_yyyymmdd_hhmmZ.log (UTC) and goes in the
 directory you launch from, unless --log-dir says otherwise.

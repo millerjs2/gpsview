@@ -30,6 +30,7 @@ from .corrections import Sink, SameLinkSink, SinkSpec, make_sink
 from .logfile import RawLog
 from .model import GpsState
 from .nmea import gga_sentence
+from .rtcm import describe
 from .ntrip import NtripConfig, NtripSession, make_setup
 from .autobaud import detect_baud
 from .sources import PROTOCOLS, baud_text, feed_spec, find_ttys, make_feed
@@ -40,9 +41,10 @@ STALL_SECONDS = 30.0     # no data for this long: ask the user what to do
 POLL_SECONDS = 1.0       # read timeout; the stall check runs at this rate
 NEXT_DEGREES = {DD: DDMM, DDMM: DDMMSS, DDMMSS: DD}
 TABS = {"gnss": "tab_gnss", "imu": "tab_imu", "rtk": "tab_rtk"}
+MSG_TABS = {"messages": "tab_messages", "counts": "tab_counts"}
 
 HELP = """Help:
-c -- clear raw data area
+c -- clear the messages, or the counts
 d -- toggle dd.ddd, dd mm.m and dd mm ss.s
 h -- this help
 i -- imperial units
@@ -54,7 +56,15 @@ r -- RTK corrections (NTRIP) setup
 s -- toggle raw messages output
 t -- toggle true/magnetic track
 w -- start or stop logging the raw data to a file
-1 2 3 -- GNSS, IMU, RTK tabs"""
+1 2 3 -- GNSS, IMU, RTK tabs
+4 5 -- Messages, Counts tabs (c clears the one shown)"""
+
+
+def _age(last: float | None, now: float) -> str:
+    if last is None:
+        return "-"
+    secs = max(now - last, 0.0)
+    return f"{secs:.1f} s" if secs < 10 else f"{secs:.0f} s"
 
 
 def _text(lines: list[str], highlights: tuple[tuple[str, str], ...] = ()) -> Text:
@@ -300,6 +310,8 @@ class GpsView(App):
         Binding("1", "show_tab('gnss')", "GNSS", show=False),
         Binding("2", "show_tab('imu')", "IMU", show=False),
         Binding("3", "show_tab('rtk')", "RTK", show=False),
+        Binding("4", "show_msg_tab('messages')", "Messages", show=False),
+        Binding("5", "show_msg_tab('counts')", "Counts", show=False),
     ]
 
     def __init__(self, source: Source | Feed, *, units: str = "i", deg: str = DD,
@@ -316,6 +328,8 @@ class GpsView(App):
         self.start_tab = TABS[tab]
         self.online = False
         self.rx_bytes = 0
+        self.msg_counts: dict[str, list] = {}        # message name -> [count, time of the last]
+        self._count_rows: dict[str, list[str]] = {}   # the first column of each Counts table, in order
         self._timer = StateTimer()
         self.sub_title = self.feed.label
         self.log_dir = log_dir or os.getcwd()     # the directory the user launched from
@@ -399,6 +413,7 @@ class GpsView(App):
         self.sub_title = feed.label
         self.gps = GpsState()
         self.rx_bytes = 0
+        self.msg_counts.clear()
         self.online = False
         if self.raw_log is not None:
             self._stop_log()                 # the log is named for the protocol
@@ -450,7 +465,13 @@ class GpsView(App):
                 with Horizontal():
                     yield Static(id="rtk_att", classes="box")
                     yield Static(id="rtk_tpv", classes="box")
-        yield RichLog(id="messages", max_lines=2000, wrap=False, markup=False)
+        with TabbedContent(initial="tab_messages", id="msgtabs"):
+            with TabPane("Messages", id="tab_messages"):
+                yield RichLog(id="messages", max_lines=2000, wrap=False, markup=False)
+            with TabPane("Counts", id="tab_counts"):
+                with Horizontal():
+                    yield DataTable(id="counts", cursor_type="none", zebra_stripes=True)
+                    yield DataTable(id="rtcm_counts", cursor_type="none", zebra_stripes=True)
         yield Footer()
 
     # ----------------------------------------------------------- startup
@@ -464,7 +485,13 @@ class GpsView(App):
         self.query_one("#imu_imu").border_title = "IMU"
         self.query_one("#rtk_att").border_title = "ATT"
         self.query_one("#rtk_tpv").border_title = "TPV"
-        self.query_one("#messages").border_title = "messages"
+        for table, columns in (("#counts", (("Receiver", "message"), ("Count", "count"),
+                                            ("Last", "last"))),
+                               ("#rtcm_counts", (("RTCM", "type"), ("Name", "name"),
+                                                 ("In", "in"), ("Out", "out"),
+                                                 ("Last in", "last")))):
+            for label, key in columns:
+                self.query_one(table, DataTable).add_column(label, key=key)
         self.note(f"Connecting to {self.feed.title} at {self.feed.label}")
         self.run_worker(self._session(), exclusive=True, group="feed")
         if self.ntrip is not None:
@@ -587,6 +614,10 @@ class GpsView(App):
     def _handle_events(self, events: list[Event]) -> None:
         for ev in events:
             if ev.kind == "raw":
+                if ev.msg:
+                    stat = self.msg_counts.setdefault(ev.msg, [0, 0.0])
+                    stat[0] += 1
+                    stat[1] = time.monotonic()
                 if self.raw_on:
                     log = self._log()
                     if log is not None:
@@ -604,6 +635,7 @@ class GpsView(App):
             pass
 
     def _refresh_views(self) -> None:
+        self._refresh_counts()
         base = self.screen_stack[0]
         now = datetime.now(timezone.utc)
         g, opts = self.gps, self.opts
@@ -687,9 +719,79 @@ class GpsView(App):
         self.refresh_views()
 
     def action_clear_raw(self) -> None:
+        """c: clear whichever of Messages and Counts is showing."""
+        try:
+            counts = self.screen_stack[0].query_one("#msgtabs", TabbedContent).active == "tab_counts"
+        except (NoMatches, IndexError):
+            return
+        if counts:
+            self.msg_counts.clear()
+            self._count_rows.clear()
+            if self.ntrip is not None:
+                for table in (self.ntrip.types, self.ntrip.types_out, self.ntrip.seen_in,
+                              self.ntrip.seen_out):
+                    table.clear()
+            self.refresh_counts()
+            return
         log = self._log()
         if log is not None:
             log.clear()
 
     def action_show_tab(self, tab: str) -> None:
         self.screen_stack[0].query_one("#views", TabbedContent).active = TABS[tab]
+
+    def action_show_msg_tab(self, tab: str) -> None:
+        self.screen_stack[0].query_one("#msgtabs", TabbedContent).active = MSG_TABS[tab]
+        self.refresh_counts()
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.tabbed_content.id == "msgtabs":
+            self.refresh_counts()
+
+    # ------------------------------------------------------------ message counts
+    def _receiver_rows(self) -> list[tuple[str, ...]]:
+        now = time.monotonic()
+        return [(name, str(c), _age(last, now)) for name, (c, last) in sorted(self.msg_counts.items())]
+
+    def _rtcm_rows(self) -> list[tuple[str, ...]]:
+        """One row per RTCM message type: how many came in from the caster, how many were
+        delivered to the receiver, and how long ago the last one arrived."""
+        s = self.ntrip
+        if s is None:
+            return []
+        now = time.monotonic()
+        return [(str(t), describe(t), str(s.types[t]), str(s.types_out.get(t, 0)),
+                 _age(s.seen_in.get(t), now)) for t in sorted(s.types)]
+
+    def refresh_counts(self) -> None:
+        try:
+            self._refresh_counts()
+        except (NoMatches, IndexError):
+            pass
+
+    def _refresh_counts(self) -> None:
+        base = self.screen_stack[0]
+        if base.query_one("#msgtabs", TabbedContent).active != "tab_counts":
+            return                                        # nobody is looking: no work
+        self._fill(base.query_one("#counts", DataTable), self._receiver_rows(), "receiver",
+                   ("count", "last"))
+        self._fill(base.query_one("#rtcm_counts", DataTable), self._rtcm_rows(), "rtcm",
+                   ("in", "out", "last"))
+
+    def _fill(self, table: DataTable, rows: list[tuple[str, ...]], which: str,
+              live: tuple[str, ...]) -> None:
+        """Show `rows`.  A new first column value means a new row, so the table is rebuilt (and
+        keeps its scroll position); otherwise the numbers are updated in place."""
+        keys = [r[0] for r in rows]
+        if keys != self._count_rows.get(which):
+            scroll = table.scroll_y
+            table.clear()
+            for row in rows:
+                table.add_row(*row, key=row[0])
+            self._count_rows[which] = keys
+            table.scroll_y = scroll
+            return
+        names = [c.key.value for c in table.columns.values()]
+        for row in rows:
+            for column in live:
+                table.update_cell(row[0], column, row[names.index(column)], update_width=False)

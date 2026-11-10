@@ -73,13 +73,15 @@ class GpsdDecoder:
         while b"\n" in self._buf:
             line, self._buf = self._buf.split(b"\n", 1)
             text = line.decode("utf-8", "replace").rstrip("\r")
-            events.append(raw(text))
             try:
                 value = json.loads(text)
             except ValueError:
+                events.append(raw(text))
                 continue
             if not isinstance(value, dict):
+                events.append(raw(text))
                 continue
+            events.append(raw(text, msg=str(value.get("class", ""))))
             events.append(obj(value))
             if value.get("class") == "VERSION":
                 events.append(_version_note(value))

@@ -18,7 +18,13 @@ port as UBX.  The decoder steps over both.  NMEA lines are shown in the message 
 used; RTCM frames are shown as a type and length.  Only UBX NAV messages feed the panels,
 so a mixed stream does not make the display flicker between two decoders.
 
-Not supported: NAV-SVINFO (u-blox 6 and 7, and older), NAV-HPPOSLLH, NAV-ATT, ESF
+High precision (ZED-F9P and other high-precision firmware, and what an RTK fix produces):
+NAV-HPPOSLLH replaces the PVT position with one carrying the extra digits (lat/lon to 1e-9
+degree, altitude to 0.1 mm) and its accuracy; NAV-HPPOSECEF, or NAV-POSECEF without it, gives
+the ECEF position, and NAV-VELECEF the ECEF velocity.  Each applies only to the epoch (iTOW) of
+the NAV-PVT it belongs to, so a stale one is never mixed into a newer fix.
+
+Not supported: NAV-SVINFO (u-blox 6 and 7, and older), NAV-ATT, ESF
 (the IMU tab stays empty).  NAV-SAT needs protocol version 15 or later (u-blox 8, 9, 10).
 """
 from __future__ import annotations
@@ -158,6 +164,8 @@ class UbxDecoder:
         self._time: str | None = None
         self._pos: dict = {"mode": MODE_NO_FIX}
         self._base: dict = {}
+        self._tow: int | None = None                          # iTOW of the last NAV-PVT
+        self._extra: dict[str, tuple[int, dict]] = {}         # name -> (iTOW, TPV keys)
         self._heading: float | None = None
         self._dop: dict = {}
         self._sats: dict[tuple[int, int], dict] = {}          # (gnssId, svId) from NAV-SAT
@@ -206,7 +214,8 @@ class UbxDecoder:
                 if state == "ok":
                     frame = bytes(buf[:total])
                     del buf[:total]
-                    events.append(raw(f"RTCM3 {rtcm.message_type(frame)} {total} bytes"))
+                    events.append(raw(f"RTCM3 {rtcm.message_type(frame)} {total} bytes",
+                                      msg=f"RTCM {rtcm.message_type(frame)}"))
                     continue
             # something else: step over it up to the next byte that could start a frame
             nxt = len(buf)
@@ -243,9 +252,11 @@ class UbxDecoder:
         handler = {(0x01, 0x07): self._nav_pvt, (0x01, 0x04): self._nav_dop,
                    (0x01, 0x35): self._nav_sat, (0x01, 0x43): self._nav_sig,
                    (0x01, 0x3C): self._nav_relposned,
+                   (0x01, 0x01): self._nav_posecef, (0x01, 0x11): self._nav_velecef,
+                   (0x01, 0x13): self._nav_hpposecef, (0x01, 0x14): self._nav_hpposllh,
                    (0x02, 0x32): self._rxm_rtcm}.get((msg_class, msg_id))
         if handler is None:
-            events.append(raw(text))
+            events.append(raw(text, msg=name))
             return "ok"
         try:
             extra = handler(payload)
@@ -253,7 +264,7 @@ class UbxDecoder:
             events.append(raw(text + " (short)", "yellow"))
             return "ok"
         if extra is None:
-            events.append(raw(text + " (ignored)"))
+            events.append(raw(text + " (ignored)", msg=name))
             return "ok"
         style = "dim"
         if (msg_class, msg_id) == (0x02, 0x32) and self.rtcm_last:
@@ -261,12 +272,12 @@ class UbxDecoder:
             text += (f": RTCM {msg_type} " + ("crc ok" if crc_ok else "CRC FAILED")
                      + {1: ", not used", 2: ", used"}.get(used, ""))
             style = "dim" if crc_ok else "red"
-        events.append(raw(text, style))
+        events.append(raw(text, style, msg=name))
         events.extend(extra)
         return "ok"
 
     def _on_nmea(self, line: str, events: list[Event]) -> None:
-        events.append(raw(line))
+        events.append(raw(line, msg=line[1:6] if line.startswith("$") else ""))
         if self._nmea_since is None:
             self._nmea_since = self._clock()
 
@@ -285,10 +296,11 @@ class UbxDecoder:
         if len(p) < 92:
             return None
         self._have_nav = True
-        (_tow, year, month, day, hour, minute, sec, valid, _tacc, nano, fix_type, flags,
+        (tow, year, month, day, hour, minute, sec, valid, _tacc, nano, fix_type, flags,
          _flags2, _nsv, lon, lat, height, hmsl, hacc, vacc, vel_n, vel_e, vel_d, gspeed,
          head_mot, sacc, head_acc, _pdop) = struct.unpack_from(
             "<IHBBBBBBIiBBBBiiiiIIiiiiiIIH", p)
+        self._tow = tow
         mag_dec = struct.unpack_from("<h", p, 88)[0]
         if valid & 0x03 == 0x03:                         # validDate and validTime
             try:
@@ -317,6 +329,51 @@ class UbxDecoder:
             if valid & 0x08:                             # validMag
                 self._pos["magvar"] = mag_dec * 1e-2
         return [self._tpv_event()]
+
+    def _extra_event(self, name: str, tow: int, keys: dict) -> list[Event]:
+        """Remember a position/velocity extra and, if it belongs to the current epoch, publish
+        the TPV with it applied.  One that arrives before its NAV-PVT is published with it."""
+        self._extra[name] = (tow, keys)
+        return [self._tpv_event()] if tow == self._tow else []
+
+    def _nav_posecef(self, p: bytes) -> list[Event] | None:
+        if len(p) < 20:
+            return None
+        tow, x, y, z, acc = struct.unpack_from("<IiiiI", p)
+        return self._extra_event("posecef", tow, {
+            "ecefx": x * 1e-2, "ecefy": y * 1e-2, "ecefz": z * 1e-2, "ecefpAcc": acc * 1e-2})
+
+    def _nav_velecef(self, p: bytes) -> list[Event] | None:
+        if len(p) < 20:
+            return None
+        tow, vx, vy, vz, acc = struct.unpack_from("<IiiiI", p)
+        return self._extra_event("velecef", tow, {
+            "ecefvx": vx * 1e-2, "ecefvy": vy * 1e-2, "ecefvz": vz * 1e-2,
+            "ecefvAcc": acc * 1e-2})
+
+    def _nav_hpposecef(self, p: bytes) -> list[Event] | None:
+        if len(p) < 28 or p[0] != 0:
+            return None
+        tow, x, y, z, xh, yh, zh, flags, acc = struct.unpack_from("<4xIiiibbbBI", p)
+        if flags & 0x01:                                 # invalidEcef
+            return []
+        return self._extra_event("hpecef", tow, {
+            "ecefx": x * 1e-2 + xh * 1e-4, "ecefy": y * 1e-2 + yh * 1e-4,
+            "ecefz": z * 1e-2 + zh * 1e-4, "ecefpAcc": acc * 1e-4})
+
+    def _nav_hpposllh(self, p: bytes) -> list[Event] | None:
+        if len(p) < 36 or p[0] != 0:
+            return None
+        (flags, tow, lon, lat, height, hmsl, lon_h, lat_h, h_h, msl_h, hacc,
+         vacc) = struct.unpack_from("<xxxBIiiiibbbbII", p)
+        if flags & 0x01:                                 # invalidLlh
+            return []
+        h_err, v_err = hacc * 1e-4, vacc * 1e-4
+        return self._extra_event("hpllh", tow, {
+            "lat": lat * 1e-7 + lat_h * 1e-9, "lon": lon * 1e-7 + lon_h * 1e-9,
+            "altHAE": height * 1e-3 + h_h * 1e-4, "altMSL": hmsl * 1e-3 + msl_h * 1e-4,
+            "epx": h_err, "epy": h_err, "eph": h_err, "epv": v_err,
+            "sep": math.hypot(h_err, v_err)})
 
     def _nav_dop(self, p: bytes) -> list[Event] | None:
         if len(p) < 18:
@@ -428,6 +485,13 @@ class UbxDecoder:
     # gpsd-shaped output ----------------------------------------------------
     def _tpv_event(self) -> Event:
         value: dict = {"class": "TPV", "device": self._device, **self._pos}
+        if self._pos.get("mode", MODE_NO_FIX) > MODE_NO_FIX:
+            # later entries are more precise and win: ECEF position, then its high-precision
+            # version; the high-precision lat/lon/alt only with a fix to attach them to
+            for name in ("posecef", "hpecef", "velecef", "hpllh"):
+                tow, keys = self._extra.get(name, (None, {}))
+                if tow == self._tow:
+                    value.update(keys)
         if self._time:
             value["time"] = self._time
         value.update(self._base)

@@ -116,9 +116,10 @@ class SbpDecoder:
                 typed = None
         name = type(typed).__name__ if typed is not None else "SBP"
         if name == "SBP":                     # not in the table: show it, decode nothing
-            return [raw(f"SBP unknown 0x{msg_type:04X} sender {sender} {length} bytes")]
+            return [raw(f"SBP unknown 0x{msg_type:04X} sender {sender} {length} bytes",
+                        msg=f"0x{msg_type:04X}")]
         events = [raw(f"SBP {name.removeprefix('Msg')} 0x{msg_type:04X} "
-                      f"sender {sender} {length} bytes")]
+                      f"sender {sender} {length} bytes", msg=name.removeprefix("Msg"))]
         handler = {"MsgPosLLH": self._pos_llh, "MsgUtcTime": self._utc,
                    "MsgVelNED": self._vel_ned, "MsgDops": self._dops,
                    "MsgSvAzEl": self._azel_msg,

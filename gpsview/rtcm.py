@@ -48,6 +48,27 @@ def make_frame(payload: bytes) -> bytes:
     return body + crc24q(body).to_bytes(3, "big")
 
 
+_SYSTEMS = {107: "GPS", 108: "GLONASS", 109: "Galileo", 110: "SBAS", 111: "QZSS", 112: "BeiDou",
+            113: "NavIC"}
+_NAMES = {1004: "GPS L1/L2 observations", 1005: "Station ARP", 1006: "Station ARP + height",
+          1007: "Antenna descriptor", 1008: "Antenna descriptor + serial",
+          1012: "GLONASS L1/L2 observations", 1019: "GPS ephemeris", 1020: "GLONASS ephemeris",
+          1033: "Receiver and antenna descriptors", 1042: "BeiDou ephemeris",
+          1044: "QZSS ephemeris", 1045: "Galileo F/NAV ephemeris",
+          1046: "Galileo I/NAV ephemeris", 1230: "GLONASS code-phase biases",
+          4072: "u-blox proprietary"}
+
+
+def describe(msg_type: int) -> str:
+    """A short name for an RTCM 3 message number, "" if it is not a common one."""
+    if msg_type in _NAMES:
+        return _NAMES[msg_type]
+    system, level = divmod(msg_type, 10)
+    if system in _SYSTEMS and 1 <= level <= 7:
+        return f"{_SYSTEMS[system]} MSM{level}"
+    return ""
+
+
 def message_type(frame: bytes) -> int:
     """The message number of a whole frame, or 0 if the payload is too short to have one."""
     if len(frame) < HEADER + 2 + CRC_LEN:

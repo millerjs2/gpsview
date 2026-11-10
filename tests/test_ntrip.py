@@ -283,7 +283,10 @@ def test_session_forwards_whole_frames_byte_exact():
             assert session.age() is not None and session.age() < 2
             assert "NTRIP: streaming ntrip://127.0.0.1" in notes[0]
             text = session.status_text()
-            assert "streaming" in text and "1077" in text and "capture" in text
+            assert "streaming" in text and "capture" in text
+            assert not any(str(t) in text for t in session.types)       # types live in the Counts tab
+            assert session.types_out.keys() == session.types.keys()     # delivered = received
+            assert session.seen_in.keys() == session.seen_out.keys() == session.types.keys()
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -476,14 +479,14 @@ def test_status_text_drops_the_least_useful_parts_first():
     import time
     session.last_frame = time.monotonic()
     full = session.status_text("receiver: RTCM ok 9 bad 0")
-    assert full.startswith("ntrip MOUNT streaming") and "1005" in full and "out 123.5 kB" in full
+    assert full.startswith("ntrip MOUNT streaming") and "out 123.5 kB" in full and "1005" not in full
     for width in (100, 80, 60, 45):
         text = session.status_text("receiver: RTCM ok 9 bad 0", width)
         assert len(text) <= width, (width, text)
         assert text.startswith("ntrip MOUNT streaming")
     assert "receiver: RTCM ok 9 bad 0" in session.status_text("receiver: RTCM ok 9 bad 0", 70)
     assert "age 0 s" in session.status_text("receiver: RTCM ok 9 bad 0", 75)
-    assert "1005" not in session.status_text("receiver: RTCM ok 9 bad 0", 70)    # types go first
+    assert "out 123.5 kB" not in session.status_text("receiver: RTCM ok 9 bad 0", 70)   # sent goes first
     tiny = session.status_text("receiver: RTCM ok 9 bad 0", 20)
     assert len(tiny) <= 20
     session.state, session.error = "failed", "x" * 200

@@ -99,6 +99,10 @@ async def sbp_shots(spec: str) -> None:
             await pilot.press("3")
             await pilot.pause(2.5)
             save(app, "rtk.svg")
+            await pilot.press("5")                       # the Counts tab: receiver, RTCM in and out
+            await pilot.pause(2)
+            save(app, "counts.svg")
+            await pilot.press("4")
     finally:
         server.close()
         await caster.stop()
@@ -109,12 +113,13 @@ async def ubx_shot(path: str) -> None:
     try:
         name = _os.path.join(tmp, "zed-f9p.ubx")
         shutil.copy(path, name)
-        ep = dataclasses.replace(parse_endpoint(name, "ubx"), rate=0)
+        ep = dataclasses.replace(parse_endpoint(name, "ubx"), rate=6000)   # slow: shoot while it plays
         feed = ubx_feed(ep)
         app = GpsView(disguised(feed, "file://zed-f9p.ubx"))
         async with app.run_test(size=SIZE) as pilot:
-            assert await wait_for(lambda: app.gps.fix.mode >= 2 and len(app.gps.sats) > 10)
-            await pilot.pause(2)
+            assert await wait_for(lambda: app.gps.fix.mode >= 2 and len(app.gps.sats) > 10
+                                  and app.gps.fix.ecef.x is not None)
+            await pilot.pause(1)
             app.screen.dismiss("quit") if app.screen is not app.screen_stack[0] else None
             await pilot.pause(0.5)
             save(app, "ubx.svg")

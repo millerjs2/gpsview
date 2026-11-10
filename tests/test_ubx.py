@@ -24,8 +24,8 @@ GPSD_DAEMON = os.path.join(os.environ.get("GPSD_SRC", os.path.expanduser("~/dev/
 
 def pvt(fix_type=3, flags=0x01, valid=0x07, sec=9, nano=250_000_000, lat=37.5, lon=-122.25,
         height=42500, hmsl=8000, hacc=1800, vacc=3100, vel_d=-200, gspeed=1500,
-        head_mot=4500000, mag_dec=-1300):
-    p = struct.pack("<IHBBBBBBIiBBBBiiiiIIiiiiiIIH", TOW, 2026, 11, 10, 14, 5, sec, valid, 20,
+        head_mot=4500000, mag_dec=-1300, tow=TOW):
+    p = struct.pack("<IHBBBBBBIiBBBBiiiiIIiiiiiIIH", tow, 2026, 11, 10, 14, 5, sec, valid, 20,
                     nano, fix_type, flags, 0, 22, round(lon * 1e7), round(lat * 1e7), height,
                     hmsl, hacc, vacc, 1000, 500, vel_d, gspeed, head_mot, 120, 150000, 160)
     p += bytes(84 - len(p)) + struct.pack("<i", 0) + struct.pack("<hH", mag_dec, 0)
@@ -439,3 +439,129 @@ def test_real_f9p_capture_with_rtcm_in_the_stream_has_no_errors():
 def test_real_m8p_capture_reports_rxm_rtcm():
     dec, _, _ = run_capture("ublox-neo-m8p.log")
     assert dec.rtcm_ok + dec.rtcm_failed == 12           # twelve 0x02 0x32 messages in the file
+
+
+# ----------------------------------------------------------------- ECEF and high precision
+def hpllh(lat=37.5, lon=-122.25, lat_hp=-7, lon_hp=5, height=42500, h_hp=3, hmsl=8000, msl_hp=-4,
+          hacc=125, vacc=210, flags=0, tow=None):
+    p = struct.pack("<BBBBIiiiibbbbII", 0, 0, 0, flags, TOW if tow is None else tow,
+                    round(lon * 1e7), round(lat * 1e7), height, hmsl, lon_hp, lat_hp, h_hp, msl_hp,
+                    hacc, vacc)
+    assert len(p) == 36
+    return make_frame(0x01, 0x14, p)
+
+
+def hpecef(x=-270123456, y=-421012346, z=388012345, xh=4, yh=-3, zh=9, flags=0,
+           acc=135, tow=None):
+    p = struct.pack("<BBBBIiiibbbBI", 0, 0, 0, 0, TOW if tow is None else tow, x, y, z, xh, yh, zh,
+                    flags, acc)
+    assert len(p) == 28
+    return make_frame(0x01, 0x13, p)
+
+
+def posecef(x=-270123456, y=-421012345, z=388012345, acc=190, tow=None):
+    return make_frame(0x01, 0x01, struct.pack("<IiiiI", TOW if tow is None else tow, x, y, z, acc))
+
+
+def velecef(vx=-24, vy=-3, vz=19, acc=105, tow=None):
+    return make_frame(0x01, 0x11, struct.pack("<IiiiI", TOW if tow is None else tow, vx, vy, vz, acc))
+
+
+def last_tpv(data):
+    dec = UbxDecoder("t")
+    tpvs = [e.obj for e in dec.feed(data) if e.kind == "obj" and e.obj["class"] == "TPV"]
+    return tpvs[-1]
+
+
+def test_high_precision_llh_replaces_the_pvt_position():
+    t = last_tpv(pvt() + hpllh())
+    assert math.isclose(t["lat"], 37.5 - 7e-9, abs_tol=1e-12)
+    assert math.isclose(t["lon"], -122.25 + 5e-9, abs_tol=1e-12)
+    assert math.isclose(t["altHAE"], 42.5 + 3e-4, abs_tol=1e-9)         # mm plus 0.1 mm
+    assert math.isclose(t["altMSL"], 8.0 - 4e-4, abs_tol=1e-9)
+    assert math.isclose(t["eph"], 0.0125) and math.isclose(t["epv"], 0.021)      # 0.1 mm units
+    assert t["mode"] == MODE_3D and t["speed"] > 0                       # the rest is from PVT
+
+
+def test_high_precision_arriving_before_its_pvt_is_still_applied():
+    t = last_tpv(hpllh() + pvt())
+    assert math.isclose(t["lat"], 37.5 - 7e-9, abs_tol=1e-12)
+
+
+def test_a_stale_high_precision_message_is_not_mixed_into_a_newer_fix():
+    assert last_tpv(hpllh(tow=TOW - 1000) + pvt())["lat"] == pytest.approx(37.5, abs=1e-12)
+    t = last_tpv(pvt() + hpllh() + hpecef() + pvt(lat=37.6, tow=TOW + 1000))
+    assert t["lat"] == pytest.approx(37.6, abs=1e-12) and "ecefx" not in t      # the old epoch's
+
+
+def test_invalid_and_short_high_precision_messages_are_ignored():
+    assert last_tpv(pvt() + hpllh(flags=0x01))["lat"] == pytest.approx(37.5, abs=1e-12)
+    assert last_tpv(pvt() + hpecef(flags=0x01)).get("ecefx") is None
+    short = make_frame(0x01, 0x14, bytes(20))
+    dec = UbxDecoder("t")
+    ev = dec.feed(pvt() + short)
+    assert any("(ignored)" in e.text for e in ev if e.kind == "raw")
+
+
+def test_no_fix_gets_no_extras():
+    t = last_tpv(pvt(fix_type=0, flags=0) + hpllh() + hpecef())
+    assert t["mode"] == MODE_NO_FIX and "ecefx" not in t and t.get("lat") is None
+
+
+def test_ecef_position_and_velocity():
+    t = last_tpv(pvt() + posecef() + velecef())
+    assert t["ecefx"] == pytest.approx(-2701234.56) and t["ecefz"] == pytest.approx(3880123.45)
+    assert t["ecefpAcc"] == pytest.approx(1.9)
+    assert (t["ecefvx"], t["ecefvy"], t["ecefvz"]) == pytest.approx((-0.24, -0.03, 0.19))
+    assert t["ecefvAcc"] == pytest.approx(1.05)
+
+
+def test_high_precision_ecef_wins_over_plain_ecef_whichever_comes_first():
+    for order in (pvt() + posecef() + hpecef(), pvt() + hpecef() + posecef()):
+        t = last_tpv(order)
+        assert t["ecefx"] == pytest.approx(-2701234.56 + 4e-4, abs=1e-6)
+        assert t["ecefy"] == pytest.approx(-421012346 * 1e-2 - 3e-4, abs=1e-6)
+        assert t["ecefz"] == pytest.approx(388012345 * 1e-2 + 9e-4, abs=1e-6)
+        assert t["ecefpAcc"] == pytest.approx(0.0135)
+
+
+def test_the_stats_view_shows_the_ecef_rows_and_the_extra_digits():
+    from datetime import datetime, timezone
+    from gpsview import views
+    from gpsview.fmt import DD
+    state = GpsState()
+    for e in UbxDecoder("t").feed(pvt() + hpllh() + hpecef() + velecef()):
+        if e.kind == "obj":
+            state.apply(e.obj)
+    opts = views.ViewOpts(units=views.UNITS["m"], deg=DD, magnetic=False)
+    lines = views.gnss_lines(state, opts, online=True, secs=1, now=datetime.now(timezone.utc))
+    ecef = [ln for ln in lines if ln.lstrip().startswith("ECEF")]
+    assert len(ecef) == 3 and not any("n/a" in ln for ln in ecef), ecef
+    assert "-2701234.5596" in ecef[0] and "-0.240" in ecef[0]      # 0.1 mm kept
+    lat = [ln for ln in lines if ln.lstrip().startswith("Latitude")][0]
+    assert "37.49999999" in lat                                  # 37.5 - 7e-9: the extra digits
+
+
+def test_real_high_precision_capture_matches_gpsd():
+    """ZED-F9P with NAV-HPPOSLLH, NAV-HPPOSECEF and NAV-VELECEF: gpsd's own decode is the oracle."""
+    name = "ublox-zed-f9p-hp.log"
+    dec, tpvs, _ = run_capture(name)
+    gpsd_tpv, _ = gpsd_tpv_and_sky(name)
+    mine = {}
+    for t in tpvs:                                        # the last TPV of each second has everything
+        if "time" in t:
+            mine[parse_time(t["time"]).replace(microsecond=0)] = t
+    theirs = {parse_time(t["time"]).replace(microsecond=0): t for t in gpsd_tpv if "time" in t}
+    common = [w for w in mine.keys() & theirs.keys() if theirs[w].get("ecefx") is not None]
+    assert len(common) >= 10
+    for when in common:
+        a, b = mine[when], theirs[when]
+        for key in ("ecefx", "ecefy", "ecefz"):
+            assert a[key] == pytest.approx(b[key], abs=2e-4), (when, key)       # to 0.1 mm
+        for key in ("ecefvx", "ecefvy", "ecefvz", "ecefvAcc"):
+            assert a[key] == pytest.approx(b[key], abs=6e-3), (when, key)
+        assert a["ecefpAcc"] == pytest.approx(b["ecefpAcc"], abs=2e-4)
+        assert a["lat"] == pytest.approx(b["lat"], abs=2e-9)                     # 1e-9 degree
+        assert a["lon"] == pytest.approx(b["lon"], abs=2e-9)
+        assert a["altHAE"] == pytest.approx(b["altHAE"], abs=1.5e-3)             # gpsd scales the
+        assert a["altMSL"] == pytest.approx(b["altMSL"], abs=1.5e-3)             # 0.1 mm digit by 1e-5

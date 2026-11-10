@@ -503,7 +503,10 @@ class NtripSession:
         self.error = ""
         self.bytes_in = 0
         self.frames_in = 0
-        self.types: Counter[int] = Counter()
+        self.types: Counter[int] = Counter()       # RTCM message types received from the caster
+        self.types_out: Counter[int] = Counter()   # ... and the ones delivered to the receiver
+        self.seen_in: dict[int, float] = {}        # message type -> time.monotonic() last seen
+        self.seen_out: dict[int, float] = {}
         self.last_frame: float | None = None      # time.monotonic() of the last whole frame
         self.connects = 0
         self.gga_sent = 0
@@ -521,8 +524,8 @@ class NtripSession:
         """One line for the status bar, made to fit `width` columns (0 = no limit).
 
         `receiver` is the receiver's own report on the corrections, if it has one.  When the
-        line is too long the least useful parts go first: the message types, the bytes sent,
-        the bytes received.  The state, the destination, the receiver's report and the age
+        line is too long the least useful parts go first: the bytes sent, the bytes
+        received.  The state, the destination, the receiver's report and the age
         of the corrections stay.
         """
         cfg, sink = self.cfg, self.sink
@@ -537,7 +540,6 @@ class NtripSession:
         if self.frames_in:
             parts.append((f"age {age:.0f} s" if age is not None else "", 2))
             parts.append((f"rx {_size(self.bytes_in)}", 4))
-            parts.append((" ".join(str(t) for t, _ in self.types.most_common(6)), 5))
         if sink.dropped:
             parts.append((f"dropped {_size(sink.dropped)}", 3))
         elif sink.bytes_out:
@@ -621,11 +623,18 @@ class NtripSession:
         frames = self.framer.feed(data)
         if not frames:
             return
+        now = time.monotonic()
         for f in frames:
             self.types[f.type] += 1
+            self.seen_in[f.type] = now
         self.frames_in += len(frames)
-        self.last_frame = time.monotonic()
+        self.last_frame = now
         await self.sink.send([f.data for f in frames])
+        if self.sink.state == "up":                    # delivered, not dropped
+            now = time.monotonic()
+            for f in frames:
+                self.types_out[f.type] += 1
+                self.seen_out[f.type] = now
         if self.sink.state != self._sink_state:
             self._sink_state = self.sink.state
             if self.sink.state == "up":

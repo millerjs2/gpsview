@@ -9,6 +9,27 @@ TabbedContent {
     height: 3fr;
 }
 
+/* the lower pane: Messages and Counts tabs */
+#msgtabs {
+    height: 1fr;
+    min-height: 8;
+}
+
+#msgtabs TabPane {
+    padding: 0;
+}
+
+#counts {
+    width: 2fr;
+    height: 1fr;
+}
+
+#rtcm_counts {
+    width: 3fr;
+    height: 1fr;
+    margin-left: 1;
+}
+
 TabPane {
     height: 1fr;
     padding: 0 1;
@@ -47,8 +68,8 @@ TabPane {
 /* messages: the raw data from the source (dim) and notices, below the tabs */
 #messages {
     height: 1fr;
-    min-height: 5;
-    border: round $primary;
+    border: none;
+    scrollbar-size-vertical: 1;
 }
 
 /* help popup (cgps 'h') */

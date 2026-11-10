@@ -22,10 +22,12 @@ class Event:
     text: str = ""
     obj: dict | None = None
     style: str = ""
+    msg: str = ""             # raw events: what kind of message this was ("GNGGA", "NAV-PVT"),
+                              # for the message counts; "" for lines that are not messages
 
 
-def raw(text: str, style: str = "dim") -> Event:
-    return Event("raw", text=text, style=style)
+def raw(text: str, style: str = "dim", msg: str = "") -> Event:
+    return Event("raw", text=text, style=style, msg=msg)
 
 
 def note(text: str, style: str = "") -> Event:

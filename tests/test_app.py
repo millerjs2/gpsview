@@ -86,11 +86,11 @@ def test_keys_change_the_view():
                 await pilot.press("s")
                 assert app.raw_on is False
                 await pilot.press("2")
-                assert app.screen_stack[0].query_one(TabbedContent).active == "tab_imu"
+                assert app.screen_stack[0].query_one("#views", TabbedContent).active == "tab_imu"
                 await pilot.press("3")
-                assert app.screen_stack[0].query_one(TabbedContent).active == "tab_rtk"
+                assert app.screen_stack[0].query_one("#views", TabbedContent).active == "tab_rtk"
                 await pilot.press("1")
-                assert app.screen_stack[0].query_one(TabbedContent).active == "tab_gnss"
+                assert app.screen_stack[0].query_one("#views", TabbedContent).active == "tab_gnss"
         finally:
             await gps.stop()
     run(scenario())

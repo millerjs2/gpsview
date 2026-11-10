@@ -162,7 +162,7 @@ class NmeaDecoder:
                 self.errors += 1
                 events.append(raw(text, "red"))
                 continue
-            events.append(raw(text))
+            events.append(raw(text, msg=fields[0]))
             try:
                 events.extend(self._sentence(fields))
             except (IndexError, ValueError, OverflowError):

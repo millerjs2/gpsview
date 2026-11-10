@@ -54,7 +54,7 @@ def test_corrections_go_back_on_the_data_link_byte_exact():
                 assert app.gps.fix.mode == MODE_3D                     # the data still flows
                 assert await wait_for(lambda: "streaming" in text_of(app, "#status"), tries=60)
                 status = text_of(app, "#status")
-                assert "ntrip RTCM streaming" in status and "1077" in status
+                assert "ntrip RTCM streaming" in status and "1077" not in status   # types are in Counts
                 assert "same link" in status or "127.0.0.1" in status
                 assert "NTRIP: streaming" in messages_text(app)
         finally:
