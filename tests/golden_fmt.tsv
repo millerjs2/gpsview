@@ -1,0 +1,276 @@
+deg_to_str2	0	0	-	-	  0.00000000
+deg_to_str2	0	0	 N	 S	  0.00000000 N
+deg_to_str2	0	0	 E	 W	  0.00000000 E
+deg_to_str2	1	0	-	-	  0 00.000000'
+deg_to_str2	1	0	 N	 S	  0 00.000000' N
+deg_to_str2	1	0	 E	 W	  0 00.000000' E
+deg_to_str2	2	0	-	-	  0 00' 00.00000"
+deg_to_str2	2	0	 N	 S	  0 00' 00.00000" N
+deg_to_str2	2	0	 E	 W	  0 00' 00.00000" E
+deg_to_str2	0	-0	-	-	  0.00000000
+deg_to_str2	0	-0	 N	 S	  0.00000000 N
+deg_to_str2	0	-0	 E	 W	  0.00000000 E
+deg_to_str2	1	-0	-	-	  0 00.000000'
+deg_to_str2	1	-0	 N	 S	  0 00.000000' N
+deg_to_str2	1	-0	 E	 W	  0 00.000000' E
+deg_to_str2	2	-0	-	-	  0 00' 00.00000"
+deg_to_str2	2	-0	 N	 S	  0 00' 00.00000" N
+deg_to_str2	2	-0	 E	 W	  0 00' 00.00000" E
+deg_to_str2	0	45.123456789000002	-	-	 45.12345679
+deg_to_str2	0	45.123456789000002	 N	 S	 45.12345679 N
+deg_to_str2	0	45.123456789000002	 E	 W	 45.12345679 E
+deg_to_str2	1	45.123456789000002	-	-	 45 07.407407'
+deg_to_str2	1	45.123456789000002	 N	 S	 45 07.407407' N
+deg_to_str2	1	45.123456789000002	 E	 W	 45 07.407407' E
+deg_to_str2	2	45.123456789000002	-	-	 45 07' 24.44444"
+deg_to_str2	2	45.123456789000002	 N	 S	 45 07' 24.44444" N
+deg_to_str2	2	45.123456789000002	 E	 W	 45 07' 24.44444" E
+deg_to_str2	0	-122.9876543	-	-	122.98765430
+deg_to_str2	0	-122.9876543	 N	 S	122.98765430 S
+deg_to_str2	0	-122.9876543	 E	 W	122.98765430 W
+deg_to_str2	1	-122.9876543	-	-	122 59.259258'
+deg_to_str2	1	-122.9876543	 N	 S	122 59.259258' S
+deg_to_str2	1	-122.9876543	 E	 W	122 59.259258' W
+deg_to_str2	2	-122.9876543	-	-	122 59' 15.55548"
+deg_to_str2	2	-122.9876543	 N	 S	122 59' 15.55548" S
+deg_to_str2	2	-122.9876543	 E	 W	122 59' 15.55548" W
+deg_to_str2	0	1e-08	-	-	  0.00000001
+deg_to_str2	0	1e-08	 N	 S	  0.00000001 N
+deg_to_str2	0	1e-08	 E	 W	  0.00000001 E
+deg_to_str2	1	1e-08	-	-	  0 00.000001'
+deg_to_str2	1	1e-08	 N	 S	  0 00.000001' N
+deg_to_str2	1	1e-08	 E	 W	  0 00.000001' E
+deg_to_str2	2	1e-08	-	-	  0 00' 00.00004"
+deg_to_str2	2	1e-08	 N	 S	  0 00' 00.00004" N
+deg_to_str2	2	1e-08	 E	 W	  0 00' 00.00004" E
+deg_to_str2	0	-1e-08	-	-	  0.00000001
+deg_to_str2	0	-1e-08	 N	 S	  0.00000001 S
+deg_to_str2	0	-1e-08	 E	 W	  0.00000001 W
+deg_to_str2	1	-1e-08	-	-	  0 00.000001'
+deg_to_str2	1	-1e-08	 N	 S	  0 00.000001' S
+deg_to_str2	1	-1e-08	 E	 W	  0 00.000001' W
+deg_to_str2	2	-1e-08	-	-	  0 00' 00.00004"
+deg_to_str2	2	-1e-08	 N	 S	  0 00' 00.00004" S
+deg_to_str2	2	-1e-08	 E	 W	  0 00' 00.00004" W
+deg_to_str2	0	89.999999990000006	-	-	 89.99999999
+deg_to_str2	0	89.999999990000006	 N	 S	 89.99999999 N
+deg_to_str2	0	89.999999990000006	 E	 W	 89.99999999 E
+deg_to_str2	1	89.999999990000006	-	-	 89 59.999999'
+deg_to_str2	1	89.999999990000006	 N	 S	 89 59.999999' N
+deg_to_str2	1	89.999999990000006	 E	 W	 89 59.999999' E
+deg_to_str2	2	89.999999990000006	-	-	 89 59' 59.99996"
+deg_to_str2	2	89.999999990000006	 N	 S	 89 59' 59.99996" N
+deg_to_str2	2	89.999999990000006	 E	 W	 89 59' 59.99996" E
+deg_to_str2	0	-179.5	-	-	179.50000000
+deg_to_str2	0	-179.5	 N	 S	179.50000000 S
+deg_to_str2	0	-179.5	 E	 W	179.50000000 W
+deg_to_str2	1	-179.5	-	-	179 30.000000'
+deg_to_str2	1	-179.5	 N	 S	179 30.000000' S
+deg_to_str2	1	-179.5	 E	 W	179 30.000000' W
+deg_to_str2	2	-179.5	-	-	179 30' 00.00000"
+deg_to_str2	2	-179.5	 N	 S	179 30' 00.00000" S
+deg_to_str2	2	-179.5	 E	 W	179 30' 00.00000" W
+deg_to_str2	0	359.99999989999998	-	-	359.99999990
+deg_to_str2	0	359.99999989999998	 N	 S	359.99999990 N
+deg_to_str2	0	359.99999989999998	 E	 W	359.99999990 E
+deg_to_str2	1	359.99999989999998	-	-	359 59.999994'
+deg_to_str2	1	359.99999989999998	 N	 S	359 59.999994' N
+deg_to_str2	1	359.99999989999998	 E	 W	359 59.999994' E
+deg_to_str2	2	359.99999989999998	-	-	359 59' 59.99964"
+deg_to_str2	2	359.99999989999998	 N	 S	359 59' 59.99964" N
+deg_to_str2	2	359.99999989999998	 E	 W	359 59' 59.99964" E
+deg_to_str2	0	360	-	-	  0.00000000
+deg_to_str2	0	360	 N	 S	  0.00000000 N
+deg_to_str2	0	360	 E	 W	  0.00000000 E
+deg_to_str2	1	360	-	-	  0 00.000000'
+deg_to_str2	1	360	 N	 S	  0 00.000000' N
+deg_to_str2	1	360	 E	 W	  0 00.000000' E
+deg_to_str2	2	360	-	-	  0 00' 00.00000"
+deg_to_str2	2	360	 N	 S	  0 00' 00.00000" N
+deg_to_str2	2	360	 E	 W	  0 00' 00.00000" E
+deg_to_str2	0	-360	-	-	  0.00000000
+deg_to_str2	0	-360	 N	 S	  0.00000000 S
+deg_to_str2	0	-360	 E	 W	  0.00000000 W
+deg_to_str2	1	-360	-	-	  0 00.000000'
+deg_to_str2	1	-360	 N	 S	  0 00.000000' S
+deg_to_str2	1	-360	 E	 W	  0 00.000000' W
+deg_to_str2	2	-360	-	-	  0 00' 00.00000"
+deg_to_str2	2	-360	 N	 S	  0 00' 00.00000" S
+deg_to_str2	2	-360	 E	 W	  0 00' 00.00000" W
+deg_to_str2	0	361	-	-	n/a
+deg_to_str2	0	361	 N	 S	n/a
+deg_to_str2	0	361	 E	 W	n/a
+deg_to_str2	1	361	-	-	n/a
+deg_to_str2	1	361	 N	 S	n/a
+deg_to_str2	1	361	 E	 W	n/a
+deg_to_str2	2	361	-	-	n/a
+deg_to_str2	2	361	 N	 S	n/a
+deg_to_str2	2	361	 E	 W	n/a
+deg_to_str2	0	0.00013888888888888889	-	-	  0.00013889
+deg_to_str2	0	0.00013888888888888889	 N	 S	  0.00013889 N
+deg_to_str2	0	0.00013888888888888889	 E	 W	  0.00013889 E
+deg_to_str2	1	0.00013888888888888889	-	-	  0 00.008333'
+deg_to_str2	1	0.00013888888888888889	 N	 S	  0 00.008333' N
+deg_to_str2	1	0.00013888888888888889	 E	 W	  0 00.008333' E
+deg_to_str2	2	0.00013888888888888889	-	-	  0 00' 00.50000"
+deg_to_str2	2	0.00013888888888888889	 N	 S	  0 00' 00.50000" N
+deg_to_str2	2	0.00013888888888888889	 E	 W	  0 00' 00.50000" E
+deg_to_str2	0	12.582441388888888	-	-	 12.58244139
+deg_to_str2	0	12.582441388888888	 N	 S	 12.58244139 N
+deg_to_str2	0	12.582441388888888	 E	 W	 12.58244139 E
+deg_to_str2	1	12.582441388888888	-	-	 12 34.946483'
+deg_to_str2	1	12.582441388888888	 N	 S	 12 34.946483' N
+deg_to_str2	1	12.582441388888888	 E	 W	 12 34.946483' E
+deg_to_str2	2	12.582441388888888	-	-	 12 34' 56.78900"
+deg_to_str2	2	12.582441388888888	 N	 S	 12 34' 56.78900" N
+deg_to_str2	2	12.582441388888888	 E	 W	 12 34' 56.78900" E
+deg_to_str2	0	nan	-	-	n/a
+deg_to_str2	0	nan	 N	 S	n/a
+deg_to_str2	0	nan	 E	 W	n/a
+deg_to_str2	1	nan	-	-	n/a
+deg_to_str2	1	nan	 N	 S	n/a
+deg_to_str2	1	nan	 E	 W	n/a
+deg_to_str2	2	nan	-	-	n/a
+deg_to_str2	2	nan	 N	 S	n/a
+deg_to_str2	2	nan	 E	 W	n/a
+deg_to_str2	0	inf	-	-	n/a
+deg_to_str2	0	inf	 N	 S	n/a
+deg_to_str2	0	inf	 E	 W	n/a
+deg_to_str2	1	inf	-	-	n/a
+deg_to_str2	1	inf	 N	 S	n/a
+deg_to_str2	1	inf	 E	 W	n/a
+deg_to_str2	2	inf	-	-	n/a
+deg_to_str2	2	inf	 N	 S	n/a
+deg_to_str2	2	inf	 E	 W	n/a
+maidenhead	0	0	JJ00aa00aa
+maidenhead	37.774900000000002	-122.4194	CM87ss95qx
+maidenhead	-33.8688	151.20930000000001	QF56od51cl
+maidenhead	89.999989999999997	179.99999	RR99xx99xx
+maidenhead	-89.5	-179.90000000000001	AA00bm10xa
+maidenhead	51.5	-0.12	IO91wm50oa
+maidenhead	-22.899999999999999	-43.200000000000003	GG87jc63ax
+maidenhead	35.681199999999997	139.7671	PM95vq23bl
+maidenhead	90.5	0	    n/a 
+maidenhead	0	181	    n/a 
+ep_to_str	0	3.280839895013123	ft	+/-  0.0 ft
+ep_to_str	0	1	m	+/-  0.0 m
+ep_to_str	0	3.6000000000000001	km/h	+/-  0.0 km/h
+ep_to_str	0	1.9438444924406046	knots	+/-  0.0 knots
+ep_to_str	0	1	deg	+/-  0.0 deg
+ep_to_str	1.5	3.280839895013123	ft	+/-  4.9 ft
+ep_to_str	1.5	1	m	+/-  1.5 m
+ep_to_str	1.5	3.6000000000000001	km/h	+/-  5.4 km/h
+ep_to_str	1.5	1.9438444924406046	knots	+/-  2.9 knots
+ep_to_str	1.5	1	deg	+/-  1.5 deg
+ep_to_str	150	3.280839895013123	ft	+/-  492 ft
+ep_to_str	150	1	m	+/-  150 m
+ep_to_str	150	3.6000000000000001	km/h	+/-  540 km/h
+ep_to_str	150	1.9438444924406046	knots	+/-  291 knots
+ep_to_str	150	1	deg	+/-  150 deg
+ep_to_str	99.999899999999997	3.280839895013123	ft	+/-  328 ft
+ep_to_str	99.999899999999997	1	m	+/-100.0 m
+ep_to_str	99.999899999999997	3.6000000000000001	km/h	+/-  359 km/h
+ep_to_str	99.999899999999997	1.9438444924406046	knots	+/-  194 knots
+ep_to_str	99.999899999999997	1	deg	+/-100.0 deg
+ep_to_str	100	3.280839895013123	ft	+/-  328 ft
+ep_to_str	100	1	m	+/-  100 m
+ep_to_str	100	3.6000000000000001	km/h	+/-  360 km/h
+ep_to_str	100	1.9438444924406046	knots	+/-  194 knots
+ep_to_str	100	1	deg	+/-  100 deg
+ep_to_str	-3.2000000000000002	3.280839895013123	ft	+/- 10.5 ft
+ep_to_str	-3.2000000000000002	1	m	+/-  3.2 m
+ep_to_str	-3.2000000000000002	3.6000000000000001	km/h	+/- 11.5 km/h
+ep_to_str	-3.2000000000000002	1.9438444924406046	knots	+/-  6.2 knots
+ep_to_str	-3.2000000000000002	1	deg	+/-  3.2 deg
+ep_to_str	12345.6	3.280839895013123	ft	+/-40503 ft
+ep_to_str	12345.6	1	m	+/-12345 m
+ep_to_str	12345.6	3.6000000000000001	km/h	+/-44444 km/h
+ep_to_str	12345.6	1.9438444924406046	knots	+/-23997 knots
+ep_to_str	12345.6	1	deg	+/-12345 deg
+ep_to_str	nan	3.280839895013123	ft	 n/a  
+ep_to_str	nan	1	m	 n/a  
+ep_to_str	nan	3.6000000000000001	km/h	 n/a  
+ep_to_str	nan	1.9438444924406046	knots	 n/a  
+ep_to_str	nan	1	deg	 n/a  
+ep_to_str	inf	3.280839895013123	ft	 n/a  
+ep_to_str	inf	1	m	 n/a  
+ep_to_str	inf	3.6000000000000001	km/h	 n/a  
+ep_to_str	inf	1.9438444924406046	knots	 n/a  
+ep_to_str	inf	1	deg	 n/a  
+dop_to_str	0	 0.00
+dop_to_str	1.23	 1.23
+dop_to_str	12.345599999999999	12.35
+dop_to_str	99.998999999999995	100.00
+dop_to_str	123.456	123.46
+dop_to_str	nan	 n/a 
+dop_to_str	inf	 n/a 
+tenth_to_str	12.34	-90	90	 12.3
+tenth_to_str	12.34	0	359	 12.3
+tenth_to_str	12.34	0	254	 12.3
+tenth_to_str	-5.5	-90	90	 -5.5
+tenth_to_str	-5.5	0	359	  n/a
+tenth_to_str	-5.5	0	254	  n/a
+tenth_to_str	0	-90	90	  0.0
+tenth_to_str	0	0	359	  0.0
+tenth_to_str	0	0	254	  0.0
+tenth_to_str	359	-90	90	  n/a
+tenth_to_str	359	0	359	359.0
+tenth_to_str	359	0	254	  n/a
+tenth_to_str	400	-90	90	  n/a
+tenth_to_str	400	0	359	  n/a
+tenth_to_str	400	0	254	  n/a
+tenth_to_str	-91	-90	90	  n/a
+tenth_to_str	-91	0	359	  n/a
+tenth_to_str	-91	0	254	  n/a
+tenth_to_str	nan	-90	90	  n/a
+tenth_to_str	nan	0	359	  n/a
+tenth_to_str	nan	0	254	  n/a
+tenth_to_str	inf	-90	90	  n/a
+tenth_to_str	inf	0	359	  n/a
+tenth_to_str	inf	0	254	  n/a
+int_to_str	5	1	462	  5
+int_to_str	0	1	462	n/a
+int_to_str	462	1	462	462
+int_to_str	463	1	462	n/a
+int_to_str	-1	0	500	n/a
+int_to_str	500	0	500	500
+ecef_to_str	6378137.1234499998	1.5	ft	 20925646.8901 ft    4.921 ft/s
+ecef_to_str	6378137.1234499998	-0.0001	ft	 20925646.8901 ft   -0.000 ft/s
+ecef_to_str	6378137.1234499998	nan	ft	 20925646.8901 ft   n/a       
+ecef_to_str	6378137.1234499998	2.5	ft	 20925646.8901 ft    8.202 ft/s
+ecef_to_str	-2700000.5	1.5	ft	 -8858269.4245 ft    4.921 ft/s
+ecef_to_str	-2700000.5	-0.0001	ft	 -8858269.4245 ft   -0.000 ft/s
+ecef_to_str	-2700000.5	nan	ft	 -8858269.4245 ft   n/a       
+ecef_to_str	-2700000.5	2.5	ft	 -8858269.4245 ft    8.202 ft/s
+ecef_to_str	0	1.5	ft	        0.0000 ft    4.921 ft/s
+ecef_to_str	0	-0.0001	ft	        0.0000 ft   -0.000 ft/s
+ecef_to_str	0	nan	ft	        0.0000 ft   n/a       
+ecef_to_str	0	2.5	ft	        0.0000 ft    8.202 ft/s
+ecef_to_str	nan	1.5	ft	  n/a    4.921 ft/s
+ecef_to_str	nan	-0.0001	ft	  n/a   -0.000 ft/s
+ecef_to_str	nan	nan	ft	             n/a    n/a      
+ecef_to_str	nan	2.5	ft	  n/a    8.202 ft/s
+ecef_to_str	inf	1.5	ft	  n/a    4.921 ft/s
+ecef_to_str	inf	-0.0001	ft	  n/a   -0.000 ft/s
+ecef_to_str	inf	nan	ft	             n/a    n/a      
+ecef_to_str	inf	2.5	ft	  n/a    8.202 ft/s
+ecef_to_str	6378137.1234499998	1.5	m	  6378137.1234  m    1.500  m/s
+ecef_to_str	6378137.1234499998	-0.0001	m	  6378137.1234  m   -0.000  m/s
+ecef_to_str	6378137.1234499998	nan	m	  6378137.1234  m   n/a       
+ecef_to_str	6378137.1234499998	2.5	m	  6378137.1234  m    2.500  m/s
+ecef_to_str	-2700000.5	1.5	m	 -2700000.5000  m    1.500  m/s
+ecef_to_str	-2700000.5	-0.0001	m	 -2700000.5000  m   -0.000  m/s
+ecef_to_str	-2700000.5	nan	m	 -2700000.5000  m   n/a       
+ecef_to_str	-2700000.5	2.5	m	 -2700000.5000  m    2.500  m/s
+ecef_to_str	0	1.5	m	        0.0000  m    1.500  m/s
+ecef_to_str	0	-0.0001	m	        0.0000  m   -0.000  m/s
+ecef_to_str	0	nan	m	        0.0000  m   n/a       
+ecef_to_str	0	2.5	m	        0.0000  m    2.500  m/s
+ecef_to_str	nan	1.5	m	  n/a    1.500  m/s
+ecef_to_str	nan	-0.0001	m	  n/a   -0.000  m/s
+ecef_to_str	nan	nan	m	             n/a    n/a      
+ecef_to_str	nan	2.5	m	  n/a    2.500  m/s
+ecef_to_str	inf	1.5	m	  n/a    1.500  m/s
+ecef_to_str	inf	-0.0001	m	  n/a   -0.000  m/s
+ecef_to_str	inf	nan	m	             n/a    n/a      
+ecef_to_str	inf	2.5	m	  n/a    2.500  m/s

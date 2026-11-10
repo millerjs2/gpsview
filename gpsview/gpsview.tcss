@@ -1,0 +1,88 @@
+/*
+ * gpsview stylesheet.  Based on ~/dev/styles/tuiStyle/tui_style.tcss.
+ * Colours are theme variables ($primary, $boost, $error, $warning, $surface), so the
+ * active Textual theme controls them.
+ */
+
+/* tabs get most of the height; the message pane takes the rest (at least 5 rows) */
+TabbedContent {
+    height: 3fr;
+}
+
+TabPane {
+    height: 1fr;
+    padding: 0 1;
+}
+
+/* status bar: link, fix state, satellites, units */
+#status {
+    height: 3;
+    padding: 0 1;
+    background: $boost;
+}
+
+/* GNSS tab: the cgps data panel (45 columns of text) beside the satellite table */
+#datawin {
+    width: 50;
+    height: 1fr;
+    border: round $primary;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
+#sats {
+    width: 1fr;
+    height: 1fr;
+    border: round $primary;
+}
+
+/* IMU and RTK tabs: two boxes side by side */
+.box {
+    width: 1fr;
+    height: 1fr;
+    border: round $primary;
+    padding: 0 1;
+}
+
+/* messages: the raw data from the source (dim) and notices, below the tabs */
+#messages {
+    height: 1fr;
+    min-height: 5;
+    border: round $primary;
+}
+
+/* help popup (cgps 'h') */
+HelpScreen {
+    align: center middle;
+}
+
+#help {
+    width: 52;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+/* connection dialog (gpsd unreachable, or no data) */
+ConnectionScreen {
+    align: center middle;
+}
+
+#conn {
+    width: 80;
+    max-width: 100%;
+    height: auto;
+    border: thick $warning;
+    background: $surface;
+    padding: 1 2;
+}
+
+#conn Horizontal {
+    height: auto;
+    margin-top: 1;
+}
+
+#conn Button {
+    margin-right: 2;
+}

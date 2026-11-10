@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Runs gpsview with this project's virtualenv if there is one (.venv), else system python3.
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+if [ -x "$here/.venv/bin/python" ]; then
+    py="$here/.venv/bin/python"
+else
+    py=python3
+fi
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m gpsview "$@"
