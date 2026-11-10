@@ -324,9 +324,10 @@ def rtk_tpv_lines(fix: Fix) -> list[str]:
 # ----------------------------------------------------------------- status bar
 def status_lines(st: GpsState, opts: ViewOpts, *, link: str, online: bool,
                  secs: int, rx_bytes: int, raw_on: bool, header: str | None = None,
-                 errors: str = "", log_on: bool = False) -> list[str]:
-    """The three status rows.  header is the protocol text (default: gpsd's release);
-    errors is a counter such as 'bad checksums 2', or '' when there is none."""
+                 errors: str = "", log_on: bool = False, ntrip: str = "") -> list[str]:
+    """The three status rows, and a fourth when NTRIP is on.  header is the protocol text
+    (default: gpsd's release); errors is a counter such as 'bad checksums 2', or '' when there
+    is none; ntrip is the corrections line."""
     u = opts.units
     if header is None:
         release = st.version.release if st.version else "-"
@@ -335,9 +336,12 @@ def status_lines(st: GpsState, opts: ViewOpts, *, link: str, online: bool,
     seen, used = st.sats_seen, st.sats_used
     mag = "mag" if opts.magnetic else "true"
     counts = f"   {errors}" if errors else ""
-    return [
+    rows = [
         f"{link}  device {device}  {header}",
         f"{fix_status(st.fix, online, secs)}   sats {seen}/{used}   rx {rx_bytes} B{counts}",
         f"units {u.alt_units}/{u.speed_units}   lat/lon {opts.deg}   track {mag}   "
         f"raw {'on' if raw_on else 'off'}   log {'on' if log_on else 'off'}",
     ]
+    if ntrip:
+        rows.append(ntrip)
+    return rows

@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import dataclasses
 import os
+import re
 import sys
 
 from . import __version__, views
@@ -10,8 +13,10 @@ from .app import GpsView
 from .client import parse_source
 from .fmt import DD, DDMM, DDMMSS
 from .nmea import nmea_feed
-from .swift import SBP_DEFAULT, sbp_feed
-from .transports import parse_endpoint
+from .ntrip import NtripError, fetch_sourcetable, make_setup, parse_ntrip_url
+from .swift import sbp_feed
+from .transports import FILE_RATE, parse_endpoint
+from .ubx import ubx_feed
 
 LL_FORMATS = {"d": DD, "m": DDMM, "s": DDMMSS}
 
@@ -19,9 +24,21 @@ EPILOG = """\
 The default server is localhost:2947.  A device name after the port limits the
 watch to that device, as in  gpsview localhost:2947:/dev/ttyACM0.
 
-Without gpsd:  -n SOURCE reads raw NMEA 0183,  -sbp [SOURCE] reads Swift Binary Protocol.
-SOURCE is  /dev/ttyUSB0[:baud],  [tcp://]host:port,  or  udp://[host]:port.
-NMEA defaults to 9600 baud on a tty, SBP to 115200 (and to tcp://172.16.0.120:55555).
+Without gpsd:  -n SOURCE reads raw NMEA 0183,  -sbp SOURCE reads Swift Binary Protocol,
+-ubx SOURCE reads u-blox UBX.
+SOURCE is  /dev/ttyUSB0[:baud],  [tcp://]host:port,  udp://[host]:port,  or  a file
+(file:///path or a path to a regular file), which is replayed at serial speed.
+NMEA defaults to 9600 baud on a tty, SBP to 115200,
+UBX to 38400 (a ZED-F9; use /dev/ttyACM0:9600 for an M8 on its UART).
+
+RTK corrections (off unless asked for): --ntrip [ntrip://|ntrips://][user[:pass]@]host[:port]/MOUNT
+pulls RTCM from an NTRIP caster and writes it to the receiver, on the data link ("same", the
+default) or on another interface with --rtcm-out /dev/ttyUSB1[:baud] | host:port |
+udp://host:port.  Credentials: the URL, --ntrip-user, or NTRIP_USER and NTRIP_PASSWORD (the
+environment keeps the password out of ps and shell history).  --ntrip-list HOST[:PORT] shows
+a caster's mountpoints.  --ntrip-gga SECONDS sends your position to the caster (VRS networks
+need it); nothing about your position is sent without it.  gpsview never sends anything else
+to a receiver: no configuration commands.
 
 Keys (same as cgps): h help, q quit, d lat/lon format, i/m/n units, t true or
 magnetic track, s raw messages on or off, w log raw data to a file on or off,
@@ -35,16 +52,35 @@ directory you launch from, unless --log-dir says otherwise.
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="gpsview",
-        description="Show the fix, satellites and raw data from a gpsd server (a Textual clone of cgps).",
+        description="Show the fix, satellites and raw data from a gpsd server or a raw NMEA, SBP or UBX source (a Textual clone of cgps).",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("server", nargs="?", metavar="server[:port[:device]]",
                     help="gpsd host, port and optional device (default localhost:2947)")
     ap.add_argument("-n", "--nmea", metavar="SOURCE",
                     help="read raw NMEA 0183 from a tty, TCP or UDP, bypassing gpsd")
-    ap.add_argument("-sbp", nargs="?", const=SBP_DEFAULT, default=None, metavar="SOURCE",
-                    help="read Swift Binary Protocol from a tty, TCP or UDP, bypassing gpsd "
-                         f"(default {SBP_DEFAULT})")
+    ap.add_argument("-sbp", "--sbp", metavar="SOURCE",
+                    help="read Swift Binary Protocol from a tty, TCP, UDP or file, bypassing gpsd")
+    ap.add_argument("-ubx", "--ubx", metavar="SOURCE",
+                    help="read u-blox UBX from a tty, TCP, UDP or file, bypassing gpsd")
+    ap.add_argument("--file-rate", type=float, default=FILE_RATE, metavar="BYTES_PER_S",
+                    help="replay speed for a file source (default %(default)g, 115200 baud; "
+                         "0 = as fast as possible)")
+    ap.add_argument("--ntrip", metavar="URL",
+                    help="get RTCM corrections from this NTRIP caster and send them to the "
+                         "receiver (see --rtcm-out)")
+    ap.add_argument("--rtcm-out", metavar="DEST", default=None,
+                    help="where corrections go: 'same' (the data link; the default), "
+                         "/dev/ttyX[:baud], [tcp://]host:port, or udp://host:port")
+    ap.add_argument("--ntrip-user", metavar="USER", default=None,
+                    help="caster user name (password: NTRIP_PASSWORD in the environment)")
+    ap.add_argument("--ntrip-version", type=int, choices=[1, 2], default=2,
+                    help="NTRIP protocol version (default 2; 1 for old casters)")
+    ap.add_argument("--ntrip-gga", type=float, default=0.0, metavar="SECONDS",
+                    help="send your position to the caster as GGA this often (0 = never, the "
+                         "default; VRS mountpoints need about 10)")
+    ap.add_argument("--ntrip-list", metavar="HOST[:PORT]", default=None,
+                    help="list a caster's mountpoints and exit")
     ap.add_argument("-i", "--imu", action="store_true", help="start on the IMU tab")
     ap.add_argument("-r", "--rtk", action="store_true", help="start on the RTK tab")
     ap.add_argument("-l", "--llfmt", choices=sorted(LL_FORMATS), default="d",
@@ -65,21 +101,80 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _endpoint(spec: str, protocol: str, file_rate: float):
+    ep = parse_endpoint(spec, protocol)
+    return dataclasses.replace(ep, rate=file_rate) if ep.kind == "file" else ep
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _list_mountpoints(ap: argparse.ArgumentParser, args) -> int:
+    """--ntrip-list: print what a caster offers.  The caster's text is data from the network, so
+    control characters are removed before it reaches the terminal."""
+    try:
+        cfg = parse_ntrip_url(args.ntrip_list, user=args.ntrip_user, need_mountpoint=False)
+        cfg = dataclasses.replace(cfg, version=args.ntrip_version, mountpoint="")
+        streams = asyncio.run(fetch_sourcetable(cfg))
+    except ValueError as exc:
+        ap.error(str(exc))
+    except (NtripError, OSError) as exc:
+        print(f"gpsview: {exc}", file=sys.stderr)
+        return 1
+    if not streams:
+        print(f"{cfg.label}: the sourcetable has no streams", file=sys.stderr)
+        return 1
+    rows = [("MOUNTPOINT", "FORMAT", "SYSTEMS", "LAT", "LON", "VRS", "AUTH", "BPS")] + [
+        (s.mountpoint, s.format, s.nav_system, f"{s.latitude:.2f}", f"{s.longitude:.2f}",
+         "gga" if s.nmea else "", {"N": "none", "B": "basic", "D": "digest"}.get(
+             s.authentication, s.authentication), str(s.bitrate or "")) for s in streams]
+    rows = [tuple(_CONTROL.sub("?", c) for c in r) for r in rows]
+    widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    for r in rows:
+        print("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip())
+    return 0
+
+
+def _ntrip_setup(args, endpoint, protocol: str):
+    """The NTRIP config and where the corrections go, checked before the app starts."""
+    return make_setup(args.ntrip, args.rtcm_out, endpoint=endpoint, protocol=protocol,
+                      user=args.ntrip_user, version=args.ntrip_version, gga=args.ntrip_gga)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
     args = ap.parse_args(argv)
+    if args.ntrip_list is not None:
+        return _list_mountpoints(ap, args)
+    if args.ntrip is None:
+        stray = [o for o, v in (("--rtcm-out", args.rtcm_out), ("--ntrip-user", args.ntrip_user),
+                                ("--ntrip-gga", args.ntrip_gga or None)) if v is not None]
+        if stray:
+            ap.error(f"{', '.join(stray)} only makes sense with --ntrip")
     chosen = [name for name, given in (("server", args.server is not None),
                                        ("-n", args.nmea is not None),
-                                       ("-sbp", args.sbp is not None)) if given]
+                                       ("-sbp", args.sbp is not None),
+                                       ("-ubx", args.ubx is not None)) if given]
     if len(chosen) > 1:
         ap.error(f"choose one source: {', '.join(chosen)} given")
+    ntrip = None
     try:
+        if args.file_rate < 0:
+            raise ValueError("--file-rate must be 0 or more")
+        endpoint, protocol = None, "gpsd"
         if args.nmea is not None:
-            source = nmea_feed(parse_endpoint(args.nmea, "nmea"))
+            endpoint, protocol = _endpoint(args.nmea, "nmea", args.file_rate), "nmea"
+            source = nmea_feed(endpoint)
         elif args.sbp is not None:
-            source = sbp_feed(parse_endpoint(args.sbp, "sbp"))
+            endpoint, protocol = _endpoint(args.sbp, "sbp", args.file_rate), "sbp"
+            source = sbp_feed(endpoint)
+        elif args.ubx is not None:
+            endpoint, protocol = _endpoint(args.ubx, "ubx", args.file_rate), "ubx"
+            source = ubx_feed(endpoint)
         else:
             source = parse_source(args.server)
+        if args.ntrip is not None:
+            ntrip = _ntrip_setup(args, endpoint, protocol)
     except ValueError as exc:
         ap.error(str(exc))
     # cgps: IMU wins over RTK if both are given
@@ -90,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"--log-dir {log_dir}: not a directory")
     app = GpsView(source, units=units, deg=LL_FORMATS[args.llfmt],
                   magnetic=args.magtrack, raw_on=not args.silent, tab=tab,
-                  log_dir=log_dir, log_at_start=args.log)
+                  log_dir=log_dir, log_at_start=args.log, ntrip=ntrip)
     app.run()
     return 0
 

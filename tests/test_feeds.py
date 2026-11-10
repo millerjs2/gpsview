@@ -8,6 +8,7 @@ from gpsview.app import GpsView
 from gpsview.feeds import Feed
 from gpsview.nmea import nmea_feed
 from gpsview.swift import sbp_feed
+from gpsview.ubx import ubx_feed
 from gpsview.transports import parse_endpoint
 from tests.test_app import click_dialog, run, text_of, wait_for
 from tools.fake_feeds import FakeFeed, make_payload, nmea_epoch
@@ -125,7 +126,94 @@ def test_serial_port_that_does_not_exist_offers_retry_or_quit():
 
 
 def test_feeds_are_plain_values():
-    feed = sbp_feed(parse_endpoint("172.16.0.120:55555", "sbp"))
+    feed = sbp_feed(parse_endpoint("192.0.2.10:55555", "sbp"))
     assert isinstance(feed, Feed)
-    assert (feed.title, feed.label, feed.header) == ("SBP", "tcp://172.16.0.120:55555", "SBP")
+    assert (feed.title, feed.label, feed.header) == ("SBP", "tcp://192.0.2.10:55555", "SBP")
     assert nmea_feed(parse_endpoint("/dev/ttyUSB0", "nmea")).header == "NMEA 0183"
+
+
+def test_ubx_over_tcp_shows_fix_satellites_signals_rtk_and_mixed_nmea():
+    async def scenario():
+        fake = FakeFeed(make_payload("ubx", True), rate=0.2)
+        port = await fake.tcp()
+        try:
+            app = GpsView(ubx_feed(parse_endpoint(f"127.0.0.1:{port}", "ubx")))
+            async with app.run_test(size=(160, 50)):
+                assert await wait_for(lambda: app.gps.fix.mode == 3)
+                assert await wait_for(lambda: "3D RTKFIX FIX" in text_of(app, "#status"), tries=60)
+                status = text_of(app, "#status")
+                assert "UBX" in status and "bad checksum 0" in status
+                assert app.gps.fix.status == 3 and app.gps.fix.base.status == 3
+                assert await wait_for(lambda: app.gps.sats_used == 5)
+                table = app.screen_stack[0].query_one("#sats", DataTable)
+                assert table.row_count == 5
+                assert "Used  5" in table.border_title
+                assert app.gps.sats[0].signal                  # NAV-SIG gives signal names
+                lines = [line.text for line in app._log().lines]
+                assert any("UBX NAV-PVT" in t for t in lines)
+                assert any(t.startswith("$GPGGA") for t in lines)   # NMEA is shown, not used
+        finally:
+            await fake.stop()
+    run(scenario())
+
+
+def test_ubx_file_replay_then_end_of_file_dialog(tmp_path):
+    from gpsview.app import ConnectionScreen
+    from gpsview.ubx import make_frame
+    from tests.test_ubx import pvt
+    f = tmp_path / "capture.ubx"
+    f.write_bytes(pvt(lat=12.5) + make_frame(0x0A, 0x04, bytes(40)))
+
+    async def scenario():
+        app = GpsView(ubx_feed(parse_endpoint(str(f), "ubx")))
+        async with app.run_test(size=(160, 50)) as pilot:
+            assert await wait_for(lambda: isinstance(app.screen, ConnectionScreen))
+            assert app.gps.fix.latitude == 12.5
+            assert "End of file" in str(app.screen.query_one("Label").content)
+            texts = [line.text for line in app._log().lines]
+            assert any("UBX NAV-PVT" in t for t in texts)
+            assert any(t.startswith("end of ") for t in texts)         # said once, plainly
+            assert not any("lost" in t for t in texts)
+            await click_dialog(app, pilot, "#retry")                   # replay from the start
+            assert await wait_for(lambda: isinstance(app.screen, ConnectionScreen)
+                                  and sum("UBX NAV-PVT" in l.text for l in app._log().lines) == 2)
+            assert await click_dialog(app, pilot, "#quit")
+            assert await wait_for(lambda: not app.is_running)
+    run(scenario())
+
+
+def test_ubx_over_a_pty_and_udp():
+    async def scenario():
+        fake = FakeFeed(make_payload("ubx", True), rate=0.2)
+        tty = fake.pty()
+        try:
+            app = GpsView(ubx_feed(parse_endpoint(tty, "ubx")))
+            async with app.run_test(size=(160, 50)):
+                assert await wait_for(lambda: app.gps.fix.mode == 3, tries=300)
+        finally:
+            await fake.stop()
+        port = free_udp_port()
+        fake = FakeFeed(make_payload("ubx", True), rate=0.2)
+        fake.udp(port)
+        try:
+            app = GpsView(ubx_feed(parse_endpoint(f"udp://127.0.0.1:{port}", "ubx")))
+            async with app.run_test(size=(160, 50)):
+                assert await wait_for(lambda: app.gps.fix.mode == 3, tries=300)
+        finally:
+            await fake.stop()
+    run(scenario())
+
+
+def test_nmea_and_sbp_can_replay_files_too(tmp_path):
+    from tools.fake_feeds import nmea_epoch, sbp_epoch
+    import time
+    n, b = tmp_path / "a.nmea", tmp_path / "b.sbp"
+    n.write_bytes(nmea_epoch(time.time()))
+    b.write_bytes(sbp_epoch(time.time()))
+
+    async def scenario():
+        for feed in (nmea_feed(parse_endpoint(str(n), "nmea")), sbp_feed(parse_endpoint(str(b), "sbp"))):
+            app = GpsView(feed)
+            async with app.run_test(size=(160, 50)):
+                assert await wait_for(lambda: app.gps.fix.mode == 3, tries=300)
+    run(scenario())

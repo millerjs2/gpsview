@@ -4,15 +4,25 @@
     python3 tools/fake_feeds.py nmea --udp 10111      # NMEA datagrams to 127.0.0.1:10111
     python3 tools/fake_feeds.py sbp  --pty            # SBP on a pty; prints the tty name
     python3 tools/fake_feeds.py sbp  --no-fix --tcp 10112
+    python3 tools/fake_feeds.py ubx  --tcp 10113      # UBX mixed with NMEA, as a u-blox sends
 
 Then:  bin/gpsview -n tcp://127.0.0.1:10110     or   bin/gpsview -sbp tcp://127.0.0.1:10112
+       bin/gpsview -ubx tcp://127.0.0.1:10113
 
 NMEA: one epoch per --rate seconds: GGA, RMC, VTG, GSA, GSV (GPS and GLONASS), GST, ZDA,
 with correct checksums.  SBP: UTC_TIME, POS_LLH, VEL_NED, DOPS, SV_AZ_EL,
 MEASUREMENT_STATE, BASELINE_NED, built with the sbp package's own encoder.  Values are
-invented but in range and use the spec's units.
+invented but in range and use the spec's units.  UBX: NAV-PVT, NAV-DOP, NAV-SAT, NAV-SIG,
+NAV-RELPOSNED, with a GGA sentence in between, as a u-blox on its default port sends.
 """
 from __future__ import annotations
+
+import os as _os
+import sys as _sys
+
+# Run as  python tools/fake_x.py : the project root (where the gpsview package is) is not on
+# sys.path then, only this directory.
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 import argparse
 import asyncio
@@ -22,6 +32,10 @@ import time
 from datetime import datetime, timezone
 from typing import Callable
 
+import struct
+import tty
+
+from gpsview import ubx
 from gpsview.nmea import make_sentence
 from sbp.navigation import (MsgBaselineNED, MsgDops, MsgPosLLH, MsgUtcTime,
                             MsgVelNED)
@@ -120,9 +134,44 @@ def sbp_epoch(now: float, has_fix: bool = True) -> bytes:
     return b"".join(f.to_binary() for f in frames)
 
 
+def ubx_epoch(now: float, has_fix: bool = True) -> bytes:
+    t = datetime.fromtimestamp(now, tz=timezone.utc)
+    tow = int((now % 604800) * 1000)
+    lat, lon, speed = _position(now, has_fix)
+    # NAV-PVT, 92 bytes: fixType 3, flags carrSoln = 2 (RTK fixed) bits 6-7, diffSoln bit 1
+    pvt = struct.pack(
+        "<IHBBBBBBIiBBBBiiiiIIiiiiiIIH", tow, t.year, t.month, t.day, t.hour, t.minute,
+        t.second, 0x07 if has_fix else 0, 20, t.microsecond * 1000, 3 if has_fix else 0,
+        0x83 if has_fix else 0, 0, 22, int(lon * 1e7), int(lat * 1e7), 42500, 12000, 18, 31,
+        int(speed * 700), int(speed * 700), -20, int(speed * 1000), 4500000, 120, 150000, 160)
+    pvt += bytes(92 - len(pvt))
+    dop = struct.pack("<IHHHHHHH", tow, 200, 160, 90, 120, 105, 80, 70)
+    ubx_sats = [(0, 1, 60, 83, 46), (0, 3, 40, 308, 41), (2, 5, 25, 344, 39),
+                (6, 1, 70, 228, 45), (3, 8, 15, 120, 40)]      # gnssId, svId, el, az, cno
+    sat = struct.pack("<IBBH", tow, 1, len(ubx_sats), 0) + b"".join(
+        struct.pack("<BBBbhhI", g, sv, cno, el, az, 0, 0x08 | 0x10 | 7)
+        for g, sv, el, az, cno in ubx_sats)
+    sig = struct.pack("<IBBH", tow, 0, len(ubx_sats), 0) + b"".join(
+        struct.pack("<BBBBhBBBBHI", g, sv, 0, 0, 0, cno, 7, 0, 0, 0x08 | 1, 0)
+        for g, sv, el, az, cno in ubx_sats)
+    rel = bytearray(40)
+    rel[2:4] = struct.pack("<H", 12)
+    rel[4:8] = struct.pack("<I", tow)
+    rel[8:20] = struct.pack("<iii", 123, -56, 9)
+    rel[36:40] = struct.pack("<I", 0x01 | 0x02 | 0x04 | (2 << 3))      # fixed RTK
+    out = [ubx.make_frame(0x01, 0x07, pvt), ubx.make_frame(0x01, 0x04, dop),
+           ubx.make_frame(0x01, 0x35, sat), ubx.make_frame(0x01, 0x43, sig)]
+    if has_fix:
+        out.append(ubx.make_frame(0x01, 0x3C, bytes(rel)))
+    out.append(nmea_epoch(now, has_fix).split(b"\r\n")[0] + b"\r\n")      # a u-blox mixes NMEA in
+    return b"".join(out)
+
+
 def make_payload(protocol: str, has_fix: bool) -> Callable[[float], bytes]:
     if protocol == "nmea":
         return lambda now: nmea_epoch(now, has_fix)
+    if protocol == "ubx":
+        return lambda now: ubx_epoch(now, has_fix)
     return lambda now: sbp_epoch(now, has_fix)
 
 
@@ -134,6 +183,7 @@ class FakeFeed:
         self.make = make
         self.rate = rate
         self.stalled = False                 # True: keep the link, send nothing
+        self.received = bytearray()          # what the app wrote to us (RTCM corrections)
         self.port: int | None = None
         self.tty: str | None = None
         self._server: asyncio.base_events.Server | None = None
@@ -151,7 +201,11 @@ class FakeFeed:
         task = asyncio.create_task(self._stream_tcp(writer))
         self._tasks.add(task)
         try:
-            await reader.read()             # returns when the client goes away
+            while True:                      # the app may write corrections to us
+                data = await reader.read(65536)
+                if not data:                 # the client went away
+                    break
+                self.received += data
         except (ConnectionError, asyncio.CancelledError):
             pass
         finally:
@@ -175,8 +229,13 @@ class FakeFeed:
 
     async def _stream_udp(self, host: str, port: int) -> None:
         loop = asyncio.get_running_loop()
-        transport, _ = await loop.create_datagram_endpoint(asyncio.DatagramProtocol,
-                                                           remote_addr=(host, port))
+        received = self.received
+
+        class Receiver(asyncio.DatagramProtocol):     # replies come back to our own port
+            def datagram_received(self, data, addr):
+                received.extend(data)
+
+        transport, _ = await loop.create_datagram_endpoint(Receiver, remote_addr=(host, port))
         try:
             while True:
                 await asyncio.sleep(self.rate)
@@ -190,17 +249,25 @@ class FakeFeed:
     def pty(self) -> str:
         """A pty pair.  Returns the slave's name; the app opens it as a serial port."""
         master, slave = os.openpty()
+        tty.setraw(slave)                    # no echo: what we read from master is what the app wrote
+        os.set_blocking(master, False)
         self._fds = [master, slave]
         self.tty = os.ttyname(slave)
         self._tasks.add(asyncio.create_task(self._stream_pty(master)))
         return self.tty
 
     async def _stream_pty(self, master: int) -> None:
+        last = 0.0
         try:
             while True:
-                await asyncio.sleep(self.rate)
-                if not self.stalled:
-                    os.write(master, self.make(time.time()))
+                await asyncio.sleep(min(self.rate, 0.05))
+                try:
+                    self.received += os.read(master, 65536)
+                except (BlockingIOError, OSError):
+                    pass
+                if not self.stalled and time.time() - last >= self.rate:
+                    last = time.time()
+                    os.write(master, self.make(last))
         except asyncio.CancelledError:
             pass
 
@@ -236,8 +303,8 @@ async def _main(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="simulated NMEA or SBP receiver for gpsview")
-    ap.add_argument("protocol", choices=["nmea", "sbp"])
+    ap = argparse.ArgumentParser(description="simulated NMEA, SBP or UBX receiver for gpsview")
+    ap.add_argument("protocol", choices=["nmea", "sbp", "ubx"])
     where = ap.add_mutually_exclusive_group(required=True)
     where.add_argument("--tcp", type=int, metavar="PORT")
     where.add_argument("--udp", type=int, metavar="PORT")

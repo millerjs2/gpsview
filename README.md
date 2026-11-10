@@ -1,23 +1,34 @@
 # gpsview
 
-A Textual clone of **cgps**, the curses gpsd client in `~/dev/gpsd/clients/cgps.c`.
-It shows the same fix, error estimates, satellites and raw data, and it is built on the
-TUI style in `~/dev/styles/tuiStyle`.
+A terminal GNSS viewer built with [Textual](https://textual.textualize.io/), modelled on
+**cgps**, the curses client that ships with [gpsd](https://gpsd.io/). It shows the same fix,
+error estimates, satellites and raw data, and it can also read a receiver directly, with no
+gpsd, and feed it RTK corrections from an NTRIP caster.
 
-It reads from three sources:
+![The GNSS tab, reading a Swift receiver](docs/screenshots/gnss.svg)
+
+The screenshots are 100x40 in Textual's `nord` theme, from a receiver that sends simulated
+data (the address in them is a documentation address). `tools/screenshots.py` makes them.
+
+It reads from four sources:
 
 * **gpsd** (the default), as cgps does
 * **raw NMEA 0183**, with `-n`, bypassing gpsd
 * **Swift Binary Protocol (SBP)**, with `-sbp`, bypassing gpsd
+* **u-blox UBX**, with `-ubx`, bypassing gpsd
 
-Every source can be a serial tty, a TCP connection, or UDP.
+Every source can be a serial tty, a TCP connection, UDP, or a file (a recording, replayed).
 
-It is read-only. It never sends configuration to a receiver. The only bytes it writes
-are gpsd's `?WATCH` request, and only when the source is gpsd.
+By default it is read-only. It never sends configuration to a receiver. The only bytes it
+writes are gpsd's `?WATCH` request, and only when the source is gpsd. The one exception is
+**NTRIP**, which you turn on with `--ntrip`: RTCM corrections from a caster are then written
+to the receiver, on its data link or on another interface (see [NTRIP](#ntrip-rtk-corrections)).
+What it writes is the caster's RTCM frames and nothing else.
 
 ## Setup
 
-    cd ~/dev/gpsview
+    git clone https://github.com/millerjs2/gpsview
+    cd gpsview
     python3 -m venv .venv
     .venv/bin/pip install -r requirements.txt     # textual, pytest, pyserial, sbp
 
@@ -31,17 +42,24 @@ Python 3.14. The `sbp` package decodes SBP payloads; `pyserial` opens ttys.
     bin/gpsview pi.local:2947:/dev/ttyACM0
     bin/gpsview -i                      # start on the IMU tab
     bin/gpsview -r                      # start on the RTK tab
-    bin/gpsview -sbp                    # SBP from tcp://172.16.0.120:55555
-    bin/gpsview -sbp tcp://10.0.0.7:55555
+    # press r in the app to set up NTRIP corrections (see "NTRIP" below)
+    bin/gpsview -sbp tcp://10.0.0.7:55555   # Swift Binary Protocol over TCP
     bin/gpsview -sbp /dev/ttyUSB0       # SBP on a serial port, 115200 baud
+    bin/gpsview -ubx /dev/ttyACM0       # u-blox UBX on a serial port, 38400 baud
+    bin/gpsview -ubx tcp://10.0.0.7:5000
+    bin/gpsview -ubx capture.ubx        # replay a file at serial speed
     bin/gpsview -n /dev/ttyACM0         # NMEA on a serial port, 9600 baud
     bin/gpsview -n udp://:10110         # NMEA datagrams on UDP port 10110
+    bin/gpsview -ubx /dev/ttyACM0 --ntrip me@caster.example.com/MOUNT   # RTK, see below
+    bin/gpsview --ntrip-list caster.example.com                         # what a caster offers
     bin/gpsview --log                   # start with the raw data being logged to a file
     bin/gpsview --log-dir ~/logs        # put log files somewhere other than where you launch from
     bin/gpsview --help
 
 Options follow cgps: `-i` `-r` `-l {d,m,s}` `-m` `-s` `-u {i,m,n}` `-V`, plus `-n`, `-sbp`,
-`--log` and `--log-dir`. Give one source only: a gpsd server, `-n`, or `-sbp`.
+`-ubx`, `--file-rate`, `--log`, `--log-dir`, and the NTRIP options (`--ntrip`, `--rtcm-out`,
+`--ntrip-user`, `--ntrip-version`, `--ntrip-gga`, `--ntrip-list`). Give one source only: a
+gpsd server, `-n`, `-sbp`, or `-ubx`.
 
 | Key | Action |
 | --- | --- |
@@ -50,6 +68,7 @@ Options follow cgps: `-i` `-r` `-l {d,m,s}` `-m` `-s` `-u {i,m,n}` `-V`, plus `-
 | `d` | Cycle lat/lon format: DD.dddddddd, DD MM.mmmmmm', DD MM' SS.sssss" |
 | `i` `m` `n` | Imperial, metric, nautical units |
 | `t` | Show the track as true or magnetic |
+| `r` | RTK corrections: set up, start or stop NTRIP (see [below](#ntrip-rtk-corrections)) |
 | `s` | Raw messages on or off |
 | `c` | Clear the raw pane |
 | `w` | Start or stop logging the raw data to a file |
@@ -107,37 +126,185 @@ Other messages are listed in the raw pane as one summary line each (for example
 `SBP PosLLH 0x020A sender 1 34 bytes`), so the stream is visible even where the
 decoder does not use the message.
 
-The SBP default is `tcp://172.16.0.120:55555`. The source is read-only: nothing is sent to
-the receiver.
+There is no default address: give `-sbp` a source. The decoder sends nothing to the receiver.
+The only thing gpsview ever writes is RTCM from `--ntrip`, if you turn that on.
+
+### u-blox UBX (`-ubx`)
+
+![A u-blox UBX source](docs/screenshots/ubx.svg)
+
+Frames start with `B5 62` and end with a Fletcher checksum. A frame with a bad checksum is
+counted (`bad checksum N`) and the decoder resynchronises on the next `B5 62`. A false sync
+(a class that does not exist, or a declared length over 8 KB) is stepped over without
+waiting for the payload.
+
+Messages used:
+
+| Message | Shown as |
+| --- | --- |
+| NAV-PVT 0x0107 | fix, time, position, altitude (HAE and MSL), speed, track, climb, accuracies, magnetic variation, and the RTK state (DGPS, RTK float, RTK fixed) |
+| NAV-DOP 0x0104 | PDOP, HDOP, VDOP, TDOP, GDOP |
+| NAV-SAT 0x0135 | satellites: elevation, azimuth, C/N0, used in the solution, health |
+| NAV-SIG 0x0143 | one table row per signal, with the signal name (`L1CA`, `L2CL`, `E1B`, `B1ID1` ...), its C/N0, and whether it is used |
+| NAV-RELPOSNED 0x013C | RTK base: status, East, North, Up, length, course, station id (version 0, and version 1 with heading) |
+| RXM-RTCM 0x0232 | what the receiver did with the corrections it was sent: type, CRC ok or failed, used or not |
+
+Other messages are listed in the message pane as one line each, for example
+`UBX NAV-POSECEF 0x0101 20 bytes`.
+
+A u-blox sends NMEA by default on the same port, and a base station may send RTCM 3. Both
+are stepped over without counting errors, and shown in the message pane (`$GNGGA,...`,
+`RTCM3 1077 250 bytes`). **NMEA is shown but never used**: only UBX NAV messages feed the
+panels, so the display does not flicker between two decoders. If NMEA arrives for 5 s with
+no NAV-PVT, the message pane says to enable UBX-NAV-PVT, NAV-SAT and NAV-SIG on that port
+(`CFG-MSGOUT-UBX_NAV_PVT_*` in u-center). gpsview does not turn them on for you.
+
+Details that differ from the Swift source:
+
+* **Used** is the receiver's own flag. With NAV-SIG it is per signal (`prUsed`); NAV-SAT's
+  `svUsed` is per satellite. Both agree with gpsd on the captures in the tests.
+* **Satellites with no tracked signal** (in NAV-SAT but not in NAV-SIG) are one row with no
+  signal name.
+* **PRN numbers** are gpsd's (`ubx2_to_prn`): GLONASS 64 + slot, Galileo 300 + svId, BeiDou
+  400 + svId, QZSS 192 + svId, SBAS 120 to 151 as 33 to 64. GLONASS satellites reported
+  with svId 255 (tracked, not yet identified) are left out.
+* **Time** is NAV-PVT's date and time, only when both are marked valid; a negative `nano`
+  and a leap second (`sec` = 60) are handled.
+* **RTK status**: NAV-PVT's `carrSoln` gives the fix status on the GNSS tab. NAV-RELPOSNED
+  gives the RTK tab; its `carrSoln` sets the base status, which gpsd leaves unset.
+  High-precision parts are included: metres = (cm x 100 + hp) x 1e-4.
 
 ### Source forms
 
 | Form | Meaning | Default baud |
 | --- | --- | --- |
-| `/dev/ttyUSB0` | serial tty | NMEA 9600, SBP 115200 |
+| `/dev/ttyUSB0` | serial tty | NMEA 9600, SBP 115200, UBX 38400 |
 | `/dev/ttyUSB0:4800` | serial tty at a given baud | |
 | `host:port` or `tcp://host:port` | TCP client | |
 | `udp://host:port` | UDP: bind `host` (a local address) and read | |
 | `udp://:port` | UDP on all interfaces | |
+| `file:///path/x.ubx`, or a path to a regular file | replay a file | |
 | `[ipv6]:port`, `udp://[ipv6]:port` | IPv6 (brackets are required) | |
 
 A serial tty needs read access to the device, usually membership of the `dialout` (or
-`uucp`) group.
+`uucp`) group (and write access too, if it is also where corrections go).
+
+The UBX default of 38400 is a ZED-F9 on UART1. An M8 on its UART is 9600: use
+`-ubx /dev/ttyACM0:9600`. A USB port ignores the baud rate.
+
+**Files** are replayed at 11520 bytes per second (115200 baud, 8N1), so a recording plays as it
+would have arrived and not all at once. `--file-rate N` changes the speed in bytes per second;
+`--file-rate 0` is as fast as possible. A path counts as a file when it is a regular file
+(a tty is a device, not a regular file), or with `file://`. `./x`, `../x` and `~/x` work too.
+Any protocol can be replayed, including gpsview's own `gpsview_*.log` files. When the file
+ends, the message pane says so and a dialog offers **Replay** or **Quit**: it is not reported as
+a lost connection. A file cannot take corrections.
+
+![The RTK tab, with corrections flowing](docs/screenshots/rtk.svg)
 
 ### Logging
 
 `w` starts logging the raw data to a file, and `w` again stops it. `--log` starts logging
 as soon as gpsview starts. The file holds the bytes exactly as they arrived, so SBP
-frames are kept intact and can be decoded again later.
+and UBX frames are kept intact and can be decoded again later (or replayed with a file source).
+
+The log holds what was received, not what was sent: corrections are not logged.
 
 The file name is `gpsview_<protocol>_yyyymmdd_hhmmZ.log`, where the protocol is `gpsd`,
-`nmea` or `sbp`, and the time is UTC. For example `gpsview_sbp_20261110_1343Z.log`. The
+`nmea`, `sbp` or `ubx`, and the time is UTC. For example `gpsview_sbp_20261110_1343Z.log`. The
 file goes in the directory you launched from, or in `--log-dir DIR`. If a file with the
 same name already exists (two sessions in the same minute), the new one is
 `..._1343Z_2.log`, and an existing file is never overwritten.
 
 The status bar shows `log on` or `log off`. The messages pane names the file when
 logging starts and gives its size when logging stops.
+
+## NTRIP (RTK corrections)
+
+An RTK receiver needs a base station's observations as RTCM 3 corrections. An NTRIP caster
+serves them over the internet. gpsview can fetch them and write them to the receiver. It is
+**off until you ask for it** (`--ntrip`, or the `r` key), and it is the only time gpsview
+writes to a receiver.
+
+![The RTK dialog](docs/screenshots/rtk-dialog.svg)
+
+Press `r` in the app for the RTK dialog: caster URL, user, password, whether to send your
+position (GGA), and where the corrections go (`same` is the data link). Start and Stop turn
+corrections on and off while the app runs; the status bar then shows the caster, correction
+age and the destination. Credentials entered there are kept in memory only. "same" is not
+offered for gpsd or file sources, which cannot be written to. The same things as options:
+
+    bin/gpsview --ntrip-list caster.example.com               # mountpoints, and which need GGA
+    export NTRIP_USER=me NTRIP_PASSWORD=secret
+    bin/gpsview -ubx /dev/ttyACM0 --ntrip caster.example.com/MOUNT
+    bin/gpsview -ubx /dev/ttyACM0 --ntrip ntrips://caster.example.com:443/VRS_MOUNT \
+                --ntrip-gga 10                                # TLS, and a VRS network
+
+`--ntrip [ntrip://|ntrips://][user[:password]@]host[:port]/mountpoint`. The port defaults to
+2101. `ntrips://` is TLS (certificates are checked). `--ntrip-version 1` is for old casters;
+the default is version 2, and both are understood in the reply (`ICY 200 OK` and
+`HTTP/1.1 200 OK`, including chunked transfer encoding, which would otherwise put chunk
+sizes into the RTCM).
+
+**Credentials** come from the URL, then `--ntrip-user`, then `NTRIP_USER` and
+`NTRIP_PASSWORD`. A password on the command line shows in `ps` and in shell history, so the
+environment is the better place. The password is never shown in the header, status bar,
+message pane, log file or error messages (a URL with a bad port is reported without its
+`user:password@`).
+
+**Your position is not sent unless you ask.** A VRS mountpoint (`--ntrip-list` shows it as
+`gga`) picks its base stations from your position and sends nothing until it has had a GGA
+sentence. `--ntrip-gga SECONDS` sends one that often, built from the current fix (so it
+works with gpsd, NMEA, SBP and UBX sources). Without it, no position leaves the machine.
+
+### Where the corrections go: `--rtcm-out`
+
+Some receivers take corrections on the port they send data on. Others need them on a
+different interface (a u-blox may send data on USB and take corrections on a UART; a Swift
+receiver has its own serial port for them). So the destination is chosen separately:
+
+| `--rtcm-out` | Corrections are written to |
+| --- | --- |
+| `same` (the default) | the link the data comes from: the serial tty or TCP connection. For UDP, the address the datagrams come from. |
+| `/dev/ttyUSB1[:baud]` | another serial port (default baud as for the source) |
+| `host:port`, `tcp://host:port` | a TCP connection, for a receiver or a serial-to-TCP bridge |
+| `udp://host:port` | datagrams to that address. Here the host is where to **send**, unlike a UDP data source, where it is the address to bind. |
+
+Naming the source's own tty (`-ubx /dev/ttyACM0 --rtcm-out /dev/ttyACM0`) is the same as
+`same`, since a tty cannot be opened twice. `same` follows the data link through
+reconnects: it always writes to the current connection, never to a closed one. It is
+refused for **gpsd** (gpsd owns the receiver; give `--rtcm-out`, or let gpsd fetch NTRIP
+itself: `gpsd ntrip://...`) and for **files**.
+
+The receiver must be set to accept RTCM 3 on that port (`CFG-UART1INPROT-RTCM3X` or the
+USB equivalent for a u-blox). gpsview does not change receiver settings. With UBX, the
+receiver confirms what it got: `RXM-RTCM` lines in the message pane (`1077 crc ok, used`) and
+`receiver: RTCM ok N bad N` in the status bar. That is the quickest way to tell that the
+corrections arrived and were accepted.
+
+### Behaviour
+
+* **Whole frames only.** The stream is split into RTCM frames and each CRC-24Q is checked.
+  Only whole, good frames are forwarded, so a datagram never holds half a frame (UDP
+  output is packed into datagrams of at most 1400 bytes), and junk from the caster is not
+  passed on.
+* **Stale corrections are dropped, not queued.** If the destination is down, frames are
+  dropped and counted (`dropped` in the status bar), and gpsview retries the connection with
+  backoff (1 s up to 15 s). A write that takes more than 2 s is abandoned.
+* **The caster connection is kept up.** After a drop or an error it reconnects with backoff
+  (1 s up to 60 s), and reconnects if the caster sends nothing for 30 s. It does not retry a
+  rejected password (401, 403), a wrong mountpoint (the caster answers with its sourcetable) or
+  a redirect: it says why once and stops. The receiver display keeps working.
+* **A fourth status line** appears when NTRIP is on:
+  `ntrip MOUNT streaming  -> same link up  receiver: RTCM ok 9 bad 0  age 0 s  rx 12.3 kB  1005 1077 1087 1230  out 12.1 kB`.
+  `age` is the time since the last whole RTCM frame, and the numbers are RTCM message types.
+  The line is cut to the terminal width from the right: the message types, the bytes sent and
+  the bytes received go first, so at 80 columns the state, the destination, the receiver's
+  report and the age remain. `dropped N kB` replaces `out` when the destination was down.
+* `--ntrip-list` removes control characters from what the caster sent before printing it.
+
+Not supported: NTRIP digest authentication, following redirects, client certificates,
+proxies, SPARTN, and sending to a receiver anything except RTCM.
 
 ## Connection behaviour
 
@@ -157,8 +324,9 @@ logging starts and gives its size when logging stops.
     .venv/bin/python tools/fake_gpsd.py --no-fix   # NO FIX
     bin/gpsview localhost:2947
 
-`tools/fake_feeds.py` simulates a raw NMEA or SBP receiver. It runs on TCP, UDP, or a
-pty that stands in for a serial port:
+`tools/fake_feeds.py` simulates a raw NMEA, SBP or UBX receiver. It runs on TCP, UDP, or a
+pty that stands in for a serial port. It records what the app writes to it
+(`FakeFeed.received`), which the NTRIP tests use:
 
     .venv/bin/python tools/fake_feeds.py nmea --tcp 10110
     bin/gpsview -n tcp://127.0.0.1:10110
@@ -168,6 +336,16 @@ pty that stands in for a serial port:
 
     .venv/bin/python tools/fake_feeds.py sbp --pty    # prints the tty name
     bin/gpsview -sbp /dev/pts/3                        # use the name it printed
+
+    .venv/bin/python tools/fake_feeds.py ubx --tcp 10113   # UBX with NMEA mixed in, RTK fixed
+    bin/gpsview -ubx tcp://127.0.0.1:10113
+
+`tools/fake_ntrip.py` is a fake NTRIP caster with mountpoints `RTCM` and `VRS` (which waits for a
+GGA), version 1 and 2 replies, chunked encoding, and optional credentials:
+
+    .venv/bin/python tools/fake_ntrip.py --port 2101 --user me --password secret
+    NTRIP_PASSWORD=secret bin/gpsview -ubx tcp://127.0.0.1:10113 \
+        --ntrip me@127.0.0.1:2101/RTCM --rtcm-out same
 
 ## Limitations
 
@@ -179,11 +357,17 @@ These are the places where a source does not give what the view shows. Each show
 * **SBP**: no heading or attitude (the ORIENT messages are not decoded), so the ATT box
   on the IMU tab is empty. IMU_RAW (0x0900) is not decoded, so the IMU tab is empty too.
   No MSL altitude (POS_LLH gives HAE only), no ECEF, no leap seconds.
+* **UBX**: no IMU (ESF is not decoded), no ECEF, no leap seconds, no correction age
+  (NAV-PVT does not carry it), no NAV-SVINFO (u-blox 6 and 7 have no NAV-SAT: the satellite
+  table stays empty and the message pane lists what does arrive), no NAV-HPPOSLLH. Heading and
+  the RTK tab need NAV-RELPOSNED, which only the F9P/F9H/M8P and similar send. The track is
+  NAV-PVT's heading of motion, which is meaningless when standing still.
 * **Used satellites** mean something different for each source:
   * gpsd: its own `used` flag.
   * NMEA: the satellites listed in the GSA sentences of the epoch, one GSA per
-    constellation, combined. On the Swift receiver at 172.16.0.120 that is 30, while the
+    constellation, combined. On the Swift receiver used for testing that is 30, while the
     GGA satellite count (the number in the solution) is 22.
+  * UBX: the receiver's own flag (NAV-SAT `svUsed`, NAV-SIG `prUsed`).
   * SBP: "used" means tracked (cn0 > 0), so it is larger than the solution. The solution
     count is `n_sats` in POS_LLH, which is 22 on the same receiver, matching GGA and the
     Swift Navigation console. That 22 is the number to read as "used". No SBP satellite
@@ -196,7 +380,7 @@ These are the places where a source does not give what the view shows. Each show
 
 ## Layout and style
 
-The app follows `~/dev/styles/tuiStyle/STYLE.md`:
+The app follows the author's tuiStyle template (a Textual layout guide):
 
 * header, a 3-line status bar on `$boost`, and tabs, with a message pane and a footer
 * round `$primary` borders, and theme colours only in the stylesheet
@@ -205,9 +389,11 @@ The app follows `~/dev/styles/tuiStyle/STYLE.md`:
 
 Changes from the template, which are deliberate:
 
-* **No write path.** The style's `_write()`, confirm dialog and read-back are not
-  needed, because the app never changes the receiver. The bindings are cgps's, not
-  `g`/`p`/`c`.
+* **No write path for settings.** The style's `_write()`, confirm dialog and read-back are
+  not needed, because the app never changes a receiver's configuration. The one thing it
+  writes is RTCM from `--ntrip`, which is opt-in on the command line (so there is no confirm
+  dialog) and is not a setting (so there is nothing to read back). The bindings are cgps's,
+  not `g`/`p`/`c`.
 * **The message pane is shared.** The style's command log is replaced by one pane
   holding raw data and notices, as cgps's messages window does. It takes the rows left
   over after the tabs (at least 5), so 80x24 terminals still show data.
@@ -236,20 +422,27 @@ cgps is the reference. These are the places where gpsview differs on purpose.
 ## Files
 
     bin/gpsview              launcher (uses .venv if present)
-    gpsview/__main__.py      command line: gpsd server, -n, -sbp
+    gpsview/__main__.py      command line: gpsd server, -n, -sbp, -ubx, --ntrip
     gpsview/app.py           the Textual app, key bindings, dialogs, the read loop
     gpsview/feeds.py         Feed (transport + decoder), decoder events
-    gpsview/transports.py    TCP, UDP and serial transports; endpoint parsing
+    gpsview/transports.py    TCP, UDP, serial and file transports; endpoint parsing
     gpsview/client.py        gpsd: server string, ?WATCH, JSON decoder
     gpsview/nmea.py          NMEA 0183 decoder -> TPV, SKY
     gpsview/swift.py         SBP framing, CRC, decoder -> TPV, SKY, ATT
+    gpsview/ubx.py           UBX framing, checksum, decoder -> TPV, SKY, ATT
+    gpsview/rtcm.py          RTCM 3 framing, CRC-24Q, message types (no decoding)
+    gpsview/ntrip.py         NTRIP client, sourcetable, session (reconnect, GGA, stats)
+    gpsview/corrections.py   where corrections go: same link, tty, TCP, UDP (--rtcm-out)
     gpsview/logfile.py       the raw data log (gpsview_<protocol>_yyyymmdd_hhmmZ.log)
     gpsview/model.py         decoded objects -> plain state (no I/O)
     gpsview/fmt.py           number and coordinate formatting, ported from C
     gpsview/views.py         panel text: GNSS, satellites, IMU, RTK, status bar
     gpsview/gpsview.tcss     stylesheet
     tools/fake_gpsd.py       simulated gpsd for demos and tests
-    tools/fake_feeds.py      simulated NMEA and SBP receivers (TCP, UDP, pty)
+    tools/fake_feeds.py      simulated NMEA, SBP and UBX receivers (TCP, UDP, pty)
+    tools/fake_ntrip.py      simulated NTRIP caster (v1, v2, chunked, auth, VRS)
+    tools/screenshots.py     regenerates docs/screenshots/*.svg (100x40, nord)
+    docs/screenshots/        the README screenshots
     tools/golden/            regenerates tests/golden_fmt.tsv from the C code
     tests/                   unit, golden and end-to-end tests
 
@@ -258,10 +451,10 @@ cgps is the reference. These are the places where gpsview differs on purpose.
     .venv/bin/python -m pytest -q
 
 * `test_fmt.py` checks 276 formatter outputs against the C code. The C is taken
-  from `~/dev/gpsd` and compiled with gcc. To regenerate the golden file after
+  from a gpsd checkout (`~/dev/gpsd` by default, or `$GPSD_SRC`) and compiled with gcc. To regenerate the golden file after
   changing the gpsd source:
 
-      tools/golden/gen_golden.sh ~/dev/gpsd
+      tools/golden/gen_golden.sh /path/to/gpsd
 
 * `test_model.py`, `test_client.py` and `test_views.py` cover parsing, the gpsd server
   string, and the panel text.
@@ -272,6 +465,18 @@ cgps is the reference. These are the places where gpsview differs on purpose.
   their checksums checked.
 * `test_swift.py` builds frames with the `sbp` package's own encoder and covers framing,
   CRC errors, resynchronisation, and each mapping.
+* `test_ubx.py` covers framing, each message mapping, mixed NMEA/RTCM streams, and decodes
+  real receiver captures (u-blox 8, M8P, ZED-F9P, F9R, F9V) from gpsd's `test/daemon` directory (`$GPSD_SRC`, default `~/dev/gpsd`),
+  comparing positions, satellites, signals, used flags and DOPs with gpsd's own decode in the
+  `.chk` files. Those tests are skipped if gpsd is not checked out there (set `$GPSD_SRC`). The rest use frames
+  built from the u-blox layouts.
+* `test_ntrip.py` runs the client against `tools/fake_ntrip.py`: both versions, chunked
+  encoding, wrong credentials, wrong mountpoint, sourcetable, VRS, reconnects, and that the
+  forwarded RTCM is byte-exact and whole-frame. `test_corrections.py` covers the sinks.
+  `test_ntrip_dialog.py` drives the RTK dialog and the footer at 100x40.
+  `test_ntrip_app.py` runs the app with a fake receiver and a fake caster, with corrections on
+  the data link (TCP, pty, UDP), on a separate interface, across a reconnect, and checks the
+  GGA the caster received and that the password appears nowhere.
 * `test_app.py` runs the Textual app against `tools/fake_gpsd.py` over TCP. It covers
   keys, the help popup, no fix, a refused connection, a dropped connection and retry,
   and the stall dialog.
@@ -281,6 +486,13 @@ cgps is the reference. These are the places where gpsview differs on purpose.
 * `test_logfile.py` covers the log file name (UTC), the suffix for a second file in the
   same minute, and the app writing the received bytes.
 
-The NMEA and SBP sources have been checked against simulated receivers. The SBP source
-was also checked against the live endpoint `tcp://172.16.0.120:55555`. There was no
-NMEA TCP stream to test against.
+The NMEA and SBP sources have been checked against simulated receivers, and the SBP source
+against a live Swift receiver over TCP.
+
+UBX has been checked against real captures (above) and the fake receiver, and NTRIP against
+the fake caster. NTRIP was also run live against two public/commercial casters (NTRIP v2, one
+with a single-base mountpoint) with the corrections sent to a Swift receiver's RTCM input on a
+separate TCP port while the data was read as SBP on another: no CRC errors, destination up,
+correction age 0 to 1 s, and the receiver reporting RTK fixed, and RTK was switched off and on
+by stopping and starting the NTRIP session. A u-blox receiver has not been tried live, so UBX
+(including the RXM-RTCM feedback) is checked only against gpsd's captures.

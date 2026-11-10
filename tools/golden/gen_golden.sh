@@ -9,7 +9,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-GPSD="${1:-$HOME/dev/gpsd}"
+GPSD="${1:-${GPSD_SRC:-$HOME/dev/gpsd}}"
 GEN="$(mktemp -d)"
 trap 'rm -rf "$GEN"' EXIT
 

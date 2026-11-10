@@ -32,7 +32,6 @@ from .model import MODE_NO_FIX, MODE_3D
 from .transports import Endpoint
 from .views import iso8601
 
-SBP_DEFAULT = "tcp://172.16.0.120:55555"     # the receiver this client was asked to read
 PREAMBLE = 0x55
 HEADER = 6                                   # preamble, type, sender, length
 CRC_LEN = 2
@@ -237,5 +236,7 @@ def sbp_feed(endpoint: Endpoint) -> Feed:
         label=endpoint.label,
         header="SBP",
         make_transport=endpoint.make_transport,
+        endpoint=endpoint,
+        protocol="sbp",
         make_decoder=lambda: SbpDecoder(endpoint.device),
     )

@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
-from .transports import Transport
+from .transports import Endpoint, Transport
 
 
 @dataclass(frozen=True)
@@ -56,3 +56,5 @@ class Feed:
     header: str | None                  # status-bar protocol text; None = gpsd's release
     make_transport: Callable[[], Transport]
     make_decoder: Callable[[], Decoder]
+    endpoint: Endpoint | None = None    # where the data comes from; None for gpsd
+    protocol: str = ""                  # "gpsd", "nmea", "sbp" or "ubx" (default baud rates)

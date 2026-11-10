@@ -1,5 +1,5 @@
 /*
- * gpsview stylesheet.  Based on ~/dev/styles/tuiStyle/tui_style.tcss.
+ * gpsview stylesheet.  Based on the tuiStyle template stylesheet.
  * Colours are theme variables ($primary, $boost, $error, $warning, $surface), so the
  * active Textual theme controls them.
  */
@@ -85,4 +85,36 @@ ConnectionScreen {
 
 #conn Button {
     margin-right: 2;
+}
+
+/* RTK corrections dialog */
+NtripScreen {
+    align: center middle;
+}
+#ntrip {
+    width: 78;
+    max-width: 100%;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 0 2;
+}
+#ntrip Horizontal {
+    height: auto;
+    margin-top: 1;
+}
+#ntrip Button {
+    margin-right: 2;
+}
+#ntrip Input {
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: $panel;
+}
+#ntrip Input:focus {
+    background: $boost;
+}
+#ntrip Label {
+    margin-top: 0;
 }

@@ -41,6 +41,33 @@ def make_sentence(body: str) -> bytes:
     return f"${body}*{checksum(body):02X}\r\n".encode("ascii")
 
 
+# gpsd status -> GGA quality indicator (the reverse of GGA_STATUS)
+QUALITY_FOR_STATUS = {1: 1, 2: 2, 3: 4, 4: 5, 5: 6, 6: 6, 7: 7, 8: 8, 9: 3}
+
+
+def gga_sentence(fix, sats_used: int, hdop: float, now: datetime) -> bytes | None:
+    """A GGA sentence for the current fix, as an NTRIP caster wants it (VRS networks pick the
+    nearby base stations from it).  None when there is no position yet.
+
+    `fix` is a model.Fix.  The altitude is above mean sea level where the receiver gives it,
+    and height above the ellipsoid otherwise (a few tens of metres off: harmless for this).
+    """
+    if fix.mode < MODE_2D or math.isnan(fix.latitude) or math.isnan(fix.longitude):
+        return None
+    stamp = fix.time or now
+    alt = fix.alt_msl if not math.isnan(fix.alt_msl) else fix.alt_hae
+    lat, lon = abs(fix.latitude), abs(fix.longitude)
+    lat_d, lon_d = int(lat), int(lon)
+    body = ",".join([
+        "GPGGA", f"{stamp:%H%M%S}.{stamp.microsecond // 10000:02d}",
+        f"{lat_d:02d}{(lat - lat_d) * 60:010.7f}", "N" if fix.latitude >= 0 else "S",
+        f"{lon_d:03d}{(lon - lon_d) * 60:010.7f}", "E" if fix.longitude >= 0 else "W",
+        str(QUALITY_FOR_STATUS.get(fix.status, 1)), f"{min(sats_used, 99):02d}",
+        "" if math.isnan(hdop) else f"{hdop:.1f}",
+        "" if math.isnan(alt) else f"{alt:.3f}", "M", "", "M", "", ""])
+    return make_sentence(body)
+
+
 def split_sentence(text: str) -> tuple[list[str], bool] | None:
     """Fields of one sentence, and whether its checksum is good.  None if it is not a sentence.
 
@@ -296,5 +323,7 @@ def nmea_feed(endpoint: Endpoint) -> Feed:
         label=endpoint.label,
         header="NMEA 0183",
         make_transport=endpoint.make_transport,
+        endpoint=endpoint,
+        protocol="nmea",
         make_decoder=lambda: NmeaDecoder(endpoint.device),
     )
