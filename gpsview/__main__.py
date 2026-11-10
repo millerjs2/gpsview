@@ -65,7 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="read u-blox UBX from a tty, TCP, UDP or file, bypassing gpsd")
     ap.add_argument("-b", "--baud", metavar="RATE", default=None,
                     help="baud rate for a tty source (default by protocol: NMEA 9600, SBP "
-                         "115200, UBX 38400); the same as /dev/ttyUSB0:RATE")
+                         "115200, UBX 38400); the same as /dev/ttyUSB0:RATE.  'auto' listens at "
+                         "the usual rates and picks the one that works (sends nothing)")
     ap.add_argument("--file-rate", type=float, default=FILE_RATE, metavar="BYTES_PER_S",
                     help="replay speed for a file source (default %(default)g, 115200 baud; "
                          "0 = as fast as possible)")

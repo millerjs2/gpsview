@@ -85,6 +85,7 @@ ConnectionScreen {
 
 #conn Button {
     margin-right: 2;
+    min-width: 8;
 }
 
 /* Configure input dialog */

@@ -197,6 +197,17 @@ adapter (ttyUSB) does not. Set the rate with `-b RATE` / `--baud RATE` (50 to 40
 the `:RATE` suffix; giving both with different values is an error, and so is a baud rate for
 a network source.
 
+**Auto-detecting the baud rate:** `-b auto` (or `auto` in the input dialog's baud field) listens
+at 115200, the protocol's default, 38400, 9600, 57600, 19200, 4800, 230400, 460800 and 921600
+in turn, for up to 2 s each, and uses the first rate that yields two valid frames (NMEA
+sentences with a good checksum, UBX frames with a good checksum, SBP frames with a good CRC).
+Noise does not pass those checks, so a wrong rate is not mistaken for a right one. Nothing is
+sent to the receiver. It needs the receiver to be sending something: if no rate works the
+dialog says whether no bytes arrived (power, port, output disabled) or bytes arrived but nothing
+decoded (wrong protocol, or a rate not on the list). The worst case is about 18 s. The detected
+rate is used for reconnects too, with no rescan. The dialog that appears when data stops also
+has an **Auto-baud** button for a tty, since a wrong rate looks just like that.
+
 ### Choosing the input in the app
 
 You do not have to know the command line. Press `o` at any time to open the input dialog: pick
@@ -332,7 +343,7 @@ proxies, SPARTN, and sending to a receiver anything except RTCM.
 
 * If the source cannot be reached, a dialog offers **Retry**, **Configure another input** or **Quit**.
 * If the connection drops, the same dialog appears.
-* If no data arrives for 30 s, the dialog offers **Keep waiting**, **Retry**, **Configure another input** or
+* If no data arrives for 30 s, the dialog offers **Wait**, **Retry**, **Auto-baud** (a tty), **Configure another input** or
   **Quit**. A receiver serves one client at a time, so another phone or PC may have
   taken the stream.
 * For gpsd, a different API version from the one this client was written against
@@ -437,7 +448,7 @@ cgps is the reference. These are the places where gpsview differs on purpose.
 | `s` hides the message window (`-s` silences it) | `s` turns raw data off; notices still show | The message pane is also where notices go. |
 | Version mismatch: warning, then a 4 s pause | Warning only | No pause in a UI. |
 | Cannot connect: prints an error and exits | Dialog with Retry, Configure another input or Quit | Lets you start the source and carry on. |
-| No data for 2 minutes: exits | Dialog after 30 s with Keep waiting | Same idea, shorter, and it asks first. |
+| No data for 2 minutes: exits | Dialog after 30 s with Wait | Same idea, shorter, and it asks first. |
 | IMU and RTK come only from `-i` / `-r` | Also switchable with `1` `2` `3` | Tabs in the style. |
 | Leap seconds are shown as `(0)` if gpsd omits them | Shown as `(n/a)` | Not every source has them. |
 | "SNARD" when there is no ATT time | `n/a` | Joke text. |
@@ -448,6 +459,7 @@ cgps is the reference. These are the places where gpsview differs on purpose.
     bin/gpsview              launcher (uses .venv if present)
     gpsview/__main__.py      command line: gpsd server, -n, -sbp, -ubx, --baud, --ntrip
     gpsview/app.py           the Textual app, key bindings, dialogs, the read loop
+    gpsview/autobaud.py      baud-rate detection by listening (never writes)
     gpsview/sources.py       builds a Feed from protocol + source + baud (CLI and the input dialog)
     gpsview/feeds.py         Feed (transport + decoder), decoder events
     gpsview/transports.py    TCP, UDP, serial and file transports; endpoint parsing
@@ -498,7 +510,8 @@ cgps is the reference. These are the places where gpsview differs on purpose.
 * `test_ntrip.py` runs the client against `tools/fake_ntrip.py`: both versions, chunked
   encoding, wrong credentials, wrong mountpoint, sourcetable, VRS, reconnects, and that the
   forwarded RTCM is byte-exact and whole-frame. `test_corrections.py` covers the sinks.
-  `test_input_dialog.py` covers the baud rate and the input dialog (from the connection dialog and
+  `test_autobaud.py` covers frame scoring, the scan (with a fake receiver that is only readable at
+  its true rate), and the dialogs. `test_input_dialog.py` covers the baud rate and the input dialog (from the connection dialog and
   the `o` key). `test_ntrip_dialog.py` drives the RTK dialog and the footer at 100x40.
   `test_ntrip_app.py` runs the app with a fake receiver and a fake caster, with corrections on
   the data link (TCP, pty, UDP), on a separate interface, across a reconnect, and checks the

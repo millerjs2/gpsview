@@ -270,6 +270,7 @@ class Endpoint:
     path: str = ""
     baud: int = 0
     rate: float = FILE_RATE   # file replay speed, bytes per second (0 = unpaced)
+    autobaud: bool = False    # serial: find the baud rate by listening before connecting
 
     @property
     def label(self) -> str:

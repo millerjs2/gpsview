@@ -31,7 +31,8 @@ from .logfile import RawLog
 from .model import GpsState
 from .nmea import gga_sentence
 from .ntrip import NtripConfig, NtripSession, make_setup
-from .sources import PROTOCOLS, default_baud, feed_spec, find_ttys, make_feed
+from .autobaud import detect_baud
+from .sources import PROTOCOLS, baud_text, default_baud, feed_spec, find_ttys, make_feed
 from .transports import FILE_RATE, EndOfFile, Transport
 from .views import UNITS, StateTimer, ViewOpts
 
@@ -83,13 +84,14 @@ class HelpScreen(ModalScreen[None]):
 
 class ConnectionScreen(ModalScreen[str]):
     """Shown when the source cannot be reached, or the stream stops. Dismisses with
-    'retry', 'wait', 'configure' or 'quit'."""
+    'retry', 'wait', 'detect', 'configure' or 'quit'."""
 
     def __init__(self, title: str, detail: str, can_wait: bool,
-                 retry_label: str = "Retry") -> None:
+                 retry_label: str = "Retry", can_detect: bool = False) -> None:
         super().__init__()
         self._title, self._detail, self._can_wait = title, detail, can_wait
         self._retry_label = retry_label
+        self._can_detect = can_detect
 
     def compose(self) -> ComposeResult:
         with Vertical(id="conn"):
@@ -98,7 +100,9 @@ class ConnectionScreen(ModalScreen[str]):
             with Horizontal():
                 yield Button(self._retry_label, id="retry", variant="primary")
                 if self._can_wait:
-                    yield Button("Keep waiting", id="wait")
+                    yield Button("Wait", id="wait")
+                if self._can_detect:
+                    yield Button("Auto-baud", id="detect", variant="warning")
                 yield Button("Configure another input", id="configure", variant="success")
                 yield Button("Quit", id="quit", variant="error")
 
@@ -119,8 +123,7 @@ class SourceScreen(ModalScreen["Feed | None"]):
     def compose(self) -> ComposeResult:
         feed = self._feed
         spec = feed_spec(feed)
-        ep = feed.endpoint
-        baud = str(ep.baud) if ep is not None and ep.kind == "serial" else ""
+        baud = baud_text(feed)
         with Vertical(id="source"):
             yield Label(Text("Configure input", style="bold"))
             yield Label("Protocol")
@@ -129,7 +132,7 @@ class SourceScreen(ModalScreen["Feed | None"]):
             yield Label("Source", id="src_label")
             yield Input(spec, id="src_spec")
             yield Static("", id="src_hint")
-            yield Label("Baud rate  (tty only; blank = the protocol's default)")
+            yield Label("Baud rate  (tty only; blank = default, auto = detect by listening)")
             yield Input(baud, id="src_baud")
             yield Static("", id="src_ports")
             yield Static("", id="src_error")
@@ -370,7 +373,27 @@ class GpsView(App):
                 self.run_worker(self._session(), exclusive=True, group="feed")   # replaces the old
         self.push_screen(SourceScreen(self.feed), done)
 
-    def _adopt(self, feed: Feed) -> None:
+    def _is_tty(self) -> bool:
+        ep = self.feed.endpoint
+        return ep is not None and ep.kind == "serial"
+
+    async def _detect(self, feed: Feed) -> Feed | None:
+        """Listen at the usual baud rates and return the feed at the one that works."""
+        ep = feed.endpoint
+        assert ep is not None
+        self.note(f"Detecting the baud rate of {ep.path} (listening, sending nothing) ...", "bold")
+        result = await detect_baud(ep.path, feed.protocol,
+                                   progress=lambda b: self.note(f"  trying {b} baud ...", "dim"))
+        if result.baud is None:
+            self._detect_failure = result.summary()
+            self.note(self._detect_failure, "red")
+            return None
+        self.note(f"Detected {result.baud} baud", "green")
+        return make_feed(feed.protocol, ep.path, baud=result.baud)
+
+    _detect_failure = ""
+
+    def _adopt(self, feed: Feed, announce: bool = True) -> None:
         """Make `feed` the input: forget the old receiver's state, keep the settings."""
         self.feed = feed
         self.sub_title = feed.label
@@ -383,16 +406,20 @@ class GpsView(App):
                 feed.protocol == "gpsd" or (feed.endpoint and feed.endpoint.kind == "file")):
             self.stop_ntrip(announce=False)
             self.note("NTRIP stopped: the new input cannot take corrections (press r)", "yellow")
-        self.note(f"Input: {feed.title} at {feed.label}", "bold")
+        if announce:
+            self.note(f"Input: {feed.title} at {feed.label}", "bold")
         self.refresh_views()
 
     async def _ask(self, title: str, detail: str, *, can_wait: bool = False,
-                   retry_label: str = "Retry") -> str:
+                   retry_label: str = "Retry", can_detect: bool = False) -> str:
         """The connection dialog.  "Configure another input" opens the source dialog; choosing
         a source returns "retry" (with self.feed changed), cancelling shows this dialog again."""
         while True:
             choice = await self.push_screen_wait(
-                ConnectionScreen(title, detail, can_wait, retry_label))
+                ConnectionScreen(title, detail, can_wait, retry_label, can_detect))
+            if choice == "detect":
+                self._adopt(make_feed(self.feed.protocol, feed_spec(self.feed), baud="auto"))
+                return "retry"
             if choice != "configure":
                 return choice
             feed = await self.push_screen_wait(SourceScreen(self.feed))
@@ -468,6 +495,18 @@ class GpsView(App):
         """Connect, read, and reconnect. Every dialog is shown from here (it is a worker)."""
         while True:
             feed = self.feed                 # may have been changed by "Configure another input"
+            if feed.endpoint is not None and feed.endpoint.autobaud:
+                found = await self._detect(feed)
+                if found is None:
+                    choice = await self._ask(
+                        "No baud rate found", self._detect_failure,
+                        retry_label="Detect again")
+                    if choice == "quit":
+                        self.exit()
+                        return
+                    continue
+                self._adopt(found, announce=False)      # now a plain rate: reconnects keep it
+                feed = self.feed
             transport: Transport = feed.make_transport()
             self.decoder = feed.make_decoder()
             try:
@@ -526,8 +565,9 @@ class GpsView(App):
                         f"No data from {self.feed.title} for {STALL_SECONDS:.0f} s",
                         "It may have stopped, or the link hung. A receiver serves one "
                         "client at a time: if another phone or PC just connected, the "
-                        "stream moved to it. For a tty, check the baud rate.",
-                        can_wait=True)
+                        "stream moved to it. For a tty, a wrong baud rate looks like this: "
+                        "Auto-baud listens at the usual rates and picks the one that works.",
+                        can_wait=True, can_detect=self._is_tty())
                     if choice == "wait":
                         last = time.monotonic()
                         continue

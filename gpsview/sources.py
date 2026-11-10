@@ -21,9 +21,12 @@ _FEEDS = {"nmea": nmea_feed, "sbp": sbp_feed, "ubx": ubx_feed}
 BAUD_MIN, BAUD_MAX = 50, 4_000_000
 
 
+AUTO = "auto"
+
+
 def parse_baud(text: str | int | None) -> int | None:
-    """A baud rate, or None for "the protocol's default"."""
-    if text is None or str(text).strip() == "":
+    """A baud rate, or None for "the protocol's default" (and for "auto", see is_auto)."""
+    if text is None or str(text).strip() == "" or is_auto(text):
         return None
     t = str(text).strip()
     if not t.isdigit() or not BAUD_MIN <= int(t) <= BAUD_MAX:
@@ -32,13 +35,17 @@ def parse_baud(text: str | int | None) -> int | None:
     return int(t)
 
 
+def is_auto(text: str | int | None) -> bool:
+    return str(text).strip().lower() == AUTO
+
+
 def make_feed(protocol: str, spec: str, *, baud: str | int | None = None,
               file_rate: float = FILE_RATE) -> Feed:
     """Raises ValueError with a message fit to show the user."""
     rate = parse_baud(baud)
     spec = spec.strip()
     if protocol == "gpsd":
-        if rate is not None:
+        if rate is not None or is_auto(baud):
             raise ValueError("a baud rate only applies to a tty; gpsd owns its own devices")
         return gpsd_feed(parse_source(spec or None))
     if protocol not in _FEEDS:
@@ -54,9 +61,24 @@ def make_feed(protocol: str, spec: str, *, baud: str | int | None = None,
             raise ValueError(f"the source says {endpoint.baud} baud and the baud setting says "
                              f"{rate}: give only one")
         endpoint = dataclasses.replace(endpoint, baud=rate)
+    if is_auto(baud):
+        if endpoint.kind != "serial":
+            raise ValueError("automatic baud rate only applies to a tty (/dev/ttyUSB0)")
+        if ":" in spec.rpartition("/")[2]:
+            raise ValueError("the source gives a baud rate, so there is nothing to detect: "
+                             "drop the :RATE, or drop auto")
+        endpoint = dataclasses.replace(endpoint, autobaud=True)
     if endpoint.kind == "file":
         endpoint = dataclasses.replace(endpoint, rate=file_rate)
     return _FEEDS[protocol](endpoint)
+
+
+def baud_text(feed: Feed) -> str:
+    """The baud rate for the dialog's field: a number, "auto", or blank (not a tty)."""
+    ep = feed.endpoint
+    if ep is None or ep.kind != "serial":
+        return ""
+    return AUTO if ep.autobaud else str(ep.baud)
 
 
 def default_baud(protocol: str) -> int:
